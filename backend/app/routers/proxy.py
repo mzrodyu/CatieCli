@@ -77,12 +77,10 @@ async def options_handler():
 @router.get("/models")
 async def list_models(user: User = Depends(get_user_from_api_key)):
     """列出可用模型 (OpenAI兼容)"""
-    # 基础模型
+    # 基础模型 (Gemini 2.5+)
     base_models = [
         "gemini-2.5-pro",
         "gemini-2.5-flash", 
-        "gemini-1.5-pro",
-        "gemini-1.5-flash",
         "gemini-3-pro-preview",
     ]
     
@@ -122,13 +120,6 @@ async def list_models(user: User = Depends(get_user_from_api_key)):
     # Image 模型
     models.append({"id": "gemini-2.5-flash-image", "object": "model", "owned_by": "google"})
     
-    # OpenAI 别名
-    models.extend([
-        {"id": "gpt-4", "object": "model", "owned_by": "catiecli"},
-        {"id": "gpt-4o", "object": "model", "owned_by": "catiecli"},
-        {"id": "gpt-3.5-turbo", "object": "model", "owned_by": "catiecli"},
-        {"id": "claude-3-5-sonnet", "object": "model", "owned_by": "catiecli"},
-    ])
     
     return {"object": "list", "data": models}
 
@@ -148,7 +139,7 @@ async def chat_completions(
     except:
         raise HTTPException(status_code=400, detail="无效的JSON请求体")
     
-    model = body.get("model", "gemini-1.5-flash")
+    model = body.get("model", "gemini-2.5-flash")
     messages = body.get("messages", [])
     stream = body.get("stream", False)
     
@@ -310,7 +301,6 @@ async def list_gemini_models(user: User = Depends(get_user_from_api_key)):
     """Gemini 格式模型列表"""
     base_models = [
         "gemini-2.5-pro", "gemini-2.5-flash", 
-        "gemini-1.5-pro", "gemini-1.5-flash",
         "gemini-3-pro-preview",
     ]
     

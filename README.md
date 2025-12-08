@@ -1,17 +1,78 @@
 # 🐱 CatieCli-maomao
 
-**Gemini API 代理服务** - 支持 OpenAI 兼容接口、凭证池管理、Discord Bot 集成
+**Gemini API 代理服务** - 支持 OpenAI 兼容接口、Gemini 原生接口、凭证池管理、Discord Bot 集成
 
 作者：**Catie猫猫**
 
 ## ✨ 功能特性
 
 - 🔄 **OpenAI 兼容 API** - 直接替换 OpenAI 端点使用
-- 🎫 **凭证池管理** - 支持多凭证轮询、自动刷新 Token
+- � **Gemini 原生 API** - 支持 generateContent / streamGenerateContent
+- 🔀 **反向代理** - 可作为 Gemini API 反代使用
+- � **凭证池管理** - 支持多凭证轮询、自动刷新 Token、失效自动禁用
 - 👥 **用户系统** - 注册登录、配额管理、使用统计
 - 🤖 **Discord Bot** - 通过 Discord 注册、获取 API Key、贡献凭证
 - 📊 **实时监控** - WebSocket 推送、使用日志、统计面板
 - 🔐 **OAuth 授权** - 支持 Google OAuth 获取 Gemini 凭证
+- 📢 **公告系统** - 支持发布公告，强制阅读倒计时
+
+## 📡 API 接口
+
+### OpenAI 兼容接口
+
+```
+POST /v1/chat/completions
+POST /chat/completions
+```
+
+### Gemini 原生接口
+
+```
+POST /v1beta/models/{model}:generateContent
+POST /v1/models/{model}:generateContent
+POST /models/{model}:generateContent
+
+POST /v1beta/models/{model}:streamGenerateContent
+POST /v1/models/{model}:streamGenerateContent
+POST /models/{model}:streamGenerateContent
+
+GET /v1beta/models
+GET /v1/models
+GET /models
+```
+
+### 支持的模型
+
+- `gemini-2.5-flash`
+- `gemini-2.5-pro`
+- `gemini-3-pro-preview`
+
+支持后缀：`-maxthinking` / `-nothinking` / `-search`
+
+### 使用示例
+
+**OpenAI 格式：**
+
+```bash
+curl http://localhost:5001/v1/chat/completions \
+  -H "Authorization: Bearer cat-your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gemini-2.5-flash",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
+
+**Gemini 格式：**
+
+```bash
+curl http://localhost:5001/v1beta/models/gemini-2.5-flash:generateContent \
+  -H "Authorization: Bearer cat-your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contents": [{"parts": [{"text": "Hello!"}]}]
+  }'
+```
 
 ## 📁 项目结构
 
