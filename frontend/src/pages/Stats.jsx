@@ -214,31 +214,31 @@ export default function Stats() {
 
         {/* 每日趋势 */}
         <div className="bg-gray-800 rounded-xl p-6 mt-8">
-          <h2 className="text-xl font-semibold mb-4">📈 每日请求趋势</h2>
-          <div className="h-64 flex items-end gap-1">
+          <h2 className="text-xl font-semibold mb-4">📈 近{days}日请求趋势</h2>
+          <div className="h-48 flex items-end gap-2">
             {daily.length === 0 ? (
               <p className="text-gray-400">暂无数据</p>
             ) : (
               daily.map((item, idx) => {
-                const maxCount = Math.max(...daily.map(d => d.count))
-                const height = maxCount > 0 ? (item.count / maxCount) * 100 : 0
+                const maxCount = Math.max(...daily.map(d => d.count), 1)
+                const height = (item.count / maxCount) * 100
                 return (
-                  <div
-                    key={idx}
-                    className="flex-1 bg-blue-500 rounded-t hover:bg-blue-400 transition-colors relative group"
-                    style={{ height: `${Math.max(height, 2)}%` }}
-                  >
-                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-black px-2 py-1 rounded text-xs opacity-0 group-hover:opacity-100 whitespace-nowrap">
-                      {item.date}: {item.count}
+                  <div key={idx} className="flex-1 flex flex-col items-center">
+                    {/* 数字标签 */}
+                    <span className="text-xs text-gray-400 mb-1">{item.count}</span>
+                    {/* 柱形图 */}
+                    <div className="w-full flex-1 flex items-end">
+                      <div
+                        className="w-full bg-blue-500 rounded-t hover:bg-blue-400 transition-colors"
+                        style={{ height: `${Math.max(height, 4)}%`, minHeight: item.count > 0 ? '8px' : '2px' }}
+                      />
                     </div>
+                    {/* 日期标签 */}
+                    <span className="text-xs text-gray-500 mt-1">{item.date?.slice(5) || ''}</span>
                   </div>
                 )
               })
             )}
-          </div>
-          <div className="flex justify-between mt-2 text-xs text-gray-500">
-            <span>{daily[0]?.date || ''}</span>
-            <span>{daily[daily.length - 1]?.date || ''}</span>
           </div>
         </div>
       </div>
