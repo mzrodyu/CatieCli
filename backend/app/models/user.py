@@ -52,16 +52,16 @@ class UsageLog(Base):
     __tablename__ = "usage_logs"
     
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     api_key_id = Column(Integer, ForeignKey("api_keys.id"), nullable=True)
-    credential_id = Column(Integer, ForeignKey("credentials.id"), nullable=True)  # 使用的凭证
+    credential_id = Column(Integer, ForeignKey("credentials.id"), nullable=True, index=True)
     model = Column(String(100), nullable=True)
     endpoint = Column(String(200), nullable=True)
     tokens_input = Column(Integer, default=0)
     tokens_output = Column(Integer, default=0)
     status_code = Column(Integer, nullable=True)
     latency_ms = Column(Float, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
     
     # 关系
     user = relationship("User", back_populates="usage_logs")
