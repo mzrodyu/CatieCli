@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import api from '../api'
 import { useAuth } from '../App'
+import { AlertModal, ConfirmModal, InputModal } from '../components/Modal'
 import { useWebSocket } from '../hooks/useWebSocket'
 
 export default function Admin() {
