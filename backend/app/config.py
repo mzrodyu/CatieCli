@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     # 注册
     allow_registration: bool = True
     discord_only_registration: bool = False  # 仅允许通过 Discord Bot 注册
+    discord_oauth_only: bool = False  # 仅允许通过 Discord OAuth 登录注册
     
     # 凭证池模式: 
     # "private" - 只能用自己的凭证
@@ -83,7 +84,8 @@ settings = Settings()
 # 可持久化的配置项
 PERSISTENT_CONFIG_KEYS = [
     "allow_registration",
-    "discord_only_registration", 
+    "discord_only_registration",
+    "discord_oauth_only", 
     "default_daily_quota",
     "credential_reward_quota",
     "base_rpm",

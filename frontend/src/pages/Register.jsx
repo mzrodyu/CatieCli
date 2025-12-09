@@ -24,9 +24,9 @@ export default function Register() {
       setDiscordEnabled(res.data.enabled)
     }).catch(() => {})
     
-    // 检查是否仅允许 Discord 注册
+    // 检查是否仅允许 Discord OAuth 注册
     api.get('/api/manage/config').then(res => {
-      setDiscordOnly(res.data.discord_only_registration)
+      setDiscordOnly(res.data.discord_oauth_only)
     }).catch(() => {})
 
     // 监听 Discord 登录回调

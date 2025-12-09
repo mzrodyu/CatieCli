@@ -52,7 +52,9 @@ async def register(data: UserRegister, db: AsyncSession = Depends(get_db)):
     if not settings.allow_registration:
         raise HTTPException(status_code=403, detail="注册已关闭")
     if settings.discord_only_registration:
-        raise HTTPException(status_code=403, detail="仅允许通过 Discord 注册，请点击 Discord 登录按钮")
+        raise HTTPException(status_code=403, detail="仅允许通过 Discord Bot 注册")
+    if settings.discord_oauth_only:
+        raise HTTPException(status_code=403, detail="仅允许通过 Discord 登录注册，请点击 Discord 登录按钮")
     
     # 检查用户名是否存在
     result = await db.execute(select(User).where(User.username == data.username))

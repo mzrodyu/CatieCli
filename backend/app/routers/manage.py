@@ -534,6 +534,7 @@ async def get_config(user: User = Depends(get_current_admin)):
     return {
         "allow_registration": settings.allow_registration,
         "discord_only_registration": settings.discord_only_registration,
+        "discord_oauth_only": settings.discord_oauth_only,
         "default_daily_quota": settings.default_daily_quota,
         "credential_reward_quota": settings.credential_reward_quota,
         "base_rpm": settings.base_rpm,
@@ -566,6 +567,7 @@ async def get_announcement():
 async def update_config(
     allow_registration: Optional[bool] = Form(None),
     discord_only_registration: Optional[bool] = Form(None),
+    discord_oauth_only: Optional[bool] = Form(None),
     default_daily_quota: Optional[int] = Form(None),
     credential_reward_quota: Optional[int] = Form(None),
     base_rpm: Optional[int] = Form(None),
@@ -590,6 +592,10 @@ async def update_config(
         settings.discord_only_registration = discord_only_registration
         await save_config_to_db("discord_only_registration", discord_only_registration)
         updated["discord_only_registration"] = discord_only_registration
+    if discord_oauth_only is not None:
+        settings.discord_oauth_only = discord_oauth_only
+        await save_config_to_db("discord_oauth_only", discord_oauth_only)
+        updated["discord_oauth_only"] = discord_oauth_only
     if default_daily_quota is not None:
         settings.default_daily_quota = default_daily_quota
         await save_config_to_db("default_daily_quota", default_daily_quota)
