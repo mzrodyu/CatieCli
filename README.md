@@ -428,8 +428,8 @@ SECRET_KEY=your-super-secret-key
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=your_admin_password
 
-# 服务端口
-PORT=5001
+# 服务端口（可选，默认 5001，使用域名反代可不配置）
+# PORT=5001
 
 # 默认用户配额
 DEFAULT_DAILY_QUOTA=100
@@ -437,10 +437,10 @@ DEFAULT_DAILY_QUOTA=100
 # 注册开关
 ALLOW_REGISTRATION=true
 
-# Google OAuth（使用 Gemini CLI 官方凭据）
-# 来源: https://github.com/anthropics/gemini-cli
-GOOGLE_CLIENT_ID=681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=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
+# Google OAuth（已内置默认凭据，无需配置）
+# 如需自定义，取消注释并填入你的凭据
+# GOOGLE_CLIENT_ID=your-client-id
+# GOOGLE_CLIENT_SECRET=your-client-secret
 ```
 
 ### Discord Bot 配置
