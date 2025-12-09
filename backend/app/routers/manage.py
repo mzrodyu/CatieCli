@@ -490,24 +490,30 @@ async def get_stats_by_user(
 @router.get("/stats/daily")
 async def get_daily_stats(
     days: int = 30,
+    status: str = "all",  # all, success, failed
     user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """获取每日统计数据（用于图表）"""
     since = datetime.utcnow() - timedelta(days=days)
     
-    result = await db.execute(
-        select(
-            func.date(UsageLog.created_at).label("date"),
-            func.count(UsageLog.id).label("count")
-        )
-        .where(UsageLog.created_at >= since)
-        .group_by(func.date(UsageLog.created_at))
-        .order_by(func.date(UsageLog.created_at))
-    )
+    query = select(
+        func.date(UsageLog.created_at).label("date"),
+        func.count(UsageLog.id).label("count")
+    ).where(UsageLog.created_at >= since)
+    
+    # 根据状态过滤
+    if status == "success":
+        query = query.where(UsageLog.status_code == 200)
+    elif status == "failed":
+        query = query.where(UsageLog.status_code != 200)
+    
+    query = query.group_by(func.date(UsageLog.created_at)).order_by(func.date(UsageLog.created_at))
+    result = await db.execute(query)
     
     return {
         "period_days": days,
+        "status_filter": status,
         "daily": [{"date": str(row[0]), "count": row[1]} for row in result.all()]
     }
 

@@ -11,10 +11,11 @@ export default function Stats() {
   const [daily, setDaily] = useState([])
   const [loading, setLoading] = useState(true)
   const [days, setDays] = useState(7)
+  const [statusFilter, setStatusFilter] = useState('all') // all, success, failed
 
   useEffect(() => {
     fetchStats()
-  }, [days])
+  }, [days, statusFilter])
 
   const fetchStats = async () => {
     try {
@@ -24,7 +25,7 @@ export default function Stats() {
         api.get('/api/manage/stats/global'),
         api.get(`/api/manage/stats/by-model?days=${days}`),
         api.get(`/api/manage/stats/by-user?days=${days}`),
-        api.get(`/api/manage/stats/daily?days=${days}`),
+        api.get(`/api/manage/stats/daily?days=${days}&status=${statusFilter}`),
       ])
       setOverview(overviewRes.data)
       setGlobalStats(globalRes.data)
@@ -214,7 +215,42 @@ export default function Stats() {
 
         {/* 每日趋势 */}
         <div className="bg-gray-800 rounded-xl p-6 mt-8">
-          <h2 className="text-xl font-semibold mb-4">📈 近{days}日请求趋势</h2>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-semibold">📈 近{days}日请求趋势</h2>
+            {/* 状态过滤按钮 */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => setStatusFilter('all')}
+                className={`px-3 py-1 rounded-lg text-sm transition-colors ${
+                  statusFilter === 'all' 
+                    ? 'bg-purple-600 text-white' 
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+              >
+                全部
+              </button>
+              <button
+                onClick={() => setStatusFilter('success')}
+                className={`px-3 py-1 rounded-lg text-sm transition-colors ${
+                  statusFilter === 'success' 
+                    ? 'bg-green-600 text-white' 
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+              >
+                ✓ 成功
+              </button>
+              <button
+                onClick={() => setStatusFilter('failed')}
+                className={`px-3 py-1 rounded-lg text-sm transition-colors ${
+                  statusFilter === 'failed' 
+                    ? 'bg-red-600 text-white' 
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+              >
+                ✗ 失败
+              </button>
+            </div>
+          </div>
           {daily.length === 0 ? (
             <p className="text-gray-400">暂无数据</p>
           ) : (
@@ -224,6 +260,10 @@ export default function Stats() {
                 {daily.map((item, idx) => {
                   const maxCount = Math.max(...daily.map(d => d.count), 1)
                   const barHeight = Math.max((item.count / maxCount) * 150, 4)
+                  // 根据过滤状态设置颜色
+                  const barColor = statusFilter === 'success' ? '#22c55e' 
+                    : statusFilter === 'failed' ? '#ef4444' 
+                    : '#3b82f6'
                   return (
                     <div 
                       key={idx} 
@@ -234,7 +274,7 @@ export default function Stats() {
                         className="w-full rounded-t transition-all hover:opacity-80"
                         style={{ 
                           height: `${barHeight}px`,
-                          backgroundColor: item.count > 0 ? '#3b82f6' : '#4b5563'
+                          backgroundColor: item.count > 0 ? barColor : '#4b5563'
                         }}
                       />
                     </div>
