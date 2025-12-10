@@ -571,27 +571,24 @@ export default function Credentials() {
               ))}
             </div>
             
+            {/* 提示 */}
+            <div className="px-4 py-2 bg-amber-500/10 border-t border-amber-500/30">
+              <div className="text-xs text-amber-400/80">
+                ⚠️ 此为本平台调用统计，不包含其他平台（如 AI Studio、CLI）的使用量
+              </div>
+            </div>
+            
             {/* 弹窗底部 */}
             <div className="p-4 border-t border-dark-600 flex items-center justify-between">
               <div className="text-xs text-gray-500">
                 重置时间: {new Date(quotaModal.reset_time).toLocaleString()}
               </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => fetchQuota(quotaModal.credential_id)}
-                  disabled={loadingQuota}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm flex items-center gap-2 disabled:opacity-50"
-                >
-                  {loadingQuota ? <RefreshCw size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                  刷新
-                </button>
-                <button
-                  onClick={() => setQuotaModal(null)}
-                  className="px-4 py-2 bg-dark-600 hover:bg-dark-500 text-white rounded-lg text-sm"
-                >
-                  关闭
-                </button>
-              </div>
+              <button
+                onClick={() => setQuotaModal(null)}
+                className="px-4 py-2 bg-dark-600 hover:bg-dark-500 text-white rounded-lg text-sm"
+              >
+                关闭
+              </button>
             </div>
           </div>
         </div>
