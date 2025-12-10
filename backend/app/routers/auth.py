@@ -273,6 +273,11 @@ async def upload_credentials(
 ):
     """上传 JSON 凭证文件（支持多文件）"""
     from app.services.crypto import encrypt_credential
+    from app.config import settings
+    
+    # 强制捐赠模式
+    if settings.force_donate:
+        is_public = True
     
     if not files:
         raise HTTPException(status_code=400, detail="请选择要上传的文件")

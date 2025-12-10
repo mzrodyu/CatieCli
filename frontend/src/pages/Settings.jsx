@@ -42,6 +42,7 @@ export default function Settings() {
       formData.append('contributor_rpm', config.contributor_rpm)
       formData.append('error_retry_count', config.error_retry_count)
       formData.append('credential_pool_mode', config.credential_pool_mode)
+      formData.append('force_donate', config.force_donate)
       formData.append('announcement_enabled', config.announcement_enabled)
       formData.append('announcement_title', config.announcement_title || '')
       formData.append('announcement_content', config.announcement_content || '')
@@ -213,6 +214,23 @@ export default function Settings() {
                 </>
               )}
             </div>
+          </div>
+
+          {/* 强制捐赠 */}
+          <div className="flex items-center justify-between bg-gray-700/50 rounded-lg px-4 py-3">
+            <div>
+              <h3 className="font-semibold">强制捐赠 🤝</h3>
+              <p className="text-gray-400 text-sm">上传凭证时强制设为公开，不给选择</p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={config?.force_donate ?? false}
+                onChange={(e) => setConfig({ ...config, force_donate: e.target.checked })}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-500"></div>
+            </label>
           </div>
 
           {/* 速率限制 */}

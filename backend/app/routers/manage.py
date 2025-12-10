@@ -686,6 +686,7 @@ async def get_config(user: User = Depends(get_current_admin)):
         "error_retry_count": settings.error_retry_count,
         "admin_username": settings.admin_username,
         "credential_pool_mode": settings.credential_pool_mode,
+        "force_donate": settings.force_donate,
         "announcement_enabled": settings.announcement_enabled,
         "announcement_title": settings.announcement_title,
         "announcement_content": settings.announcement_content,
@@ -719,6 +720,7 @@ async def update_config(
     contributor_rpm: Optional[int] = Form(None),
     error_retry_count: Optional[int] = Form(None),
     credential_pool_mode: Optional[str] = Form(None),
+    force_donate: Optional[bool] = Form(None),
     announcement_enabled: Optional[bool] = Form(None),
     announcement_title: Optional[str] = Form(None),
     announcement_content: Optional[str] = Form(None),
@@ -772,6 +774,10 @@ async def update_config(
         settings.error_retry_count = error_retry_count
         await save_config_to_db("error_retry_count", error_retry_count)
         updated["error_retry_count"] = error_retry_count
+    if force_donate is not None:
+        settings.force_donate = force_donate
+        await save_config_to_db("force_donate", force_donate)
+        updated["force_donate"] = force_donate
     
     # 公告配置
     if announcement_enabled is not None:

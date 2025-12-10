@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     # "full_shared" - 大锅饭模式（捐赠凭证即可用所有公共池）
     credential_pool_mode: str = "full_shared"
     
+    # 强制捐赠：上传凭证时强制设为公开
+    force_donate: bool = False
+    
     # 公告
     announcement_enabled: bool = False
     announcement_title: str = ""
@@ -93,6 +96,7 @@ PERSISTENT_CONFIG_KEYS = [
     "base_rpm",
     "contributor_rpm",
     "credential_pool_mode",
+    "force_donate",
     "error_retry_count",
     "announcement_enabled",
     "announcement_title",
