@@ -36,6 +36,7 @@ export default function Settings() {
       formData.append('discord_only_registration', config.discord_only_registration)
       formData.append('discord_oauth_only', config.discord_oauth_only)
       formData.append('default_daily_quota', config.default_daily_quota)
+      formData.append('no_credential_quota', config.no_credential_quota || 0)
       formData.append('credential_reward_quota', config.credential_reward_quota)
       formData.append('base_rpm', config.base_rpm)
       formData.append('contributor_rpm', config.contributor_rpm)
@@ -148,6 +149,23 @@ export default function Settings() {
               onChange={(e) => setConfig({ ...config, default_daily_quota: e.target.value === '' ? '' : parseInt(e.target.value) })}
               className="w-full bg-gray-700 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
             />
+          </div>
+
+          {/* 无凭证用户配额 */}
+          <div>
+            <h3 className="font-semibold mb-2">无凭证用户配额上限 🚫</h3>
+            <p className="text-gray-400 text-sm mb-3">没有有效凭证的用户的配额上限（0 = 不限制，使用用户自己的配额）</p>
+            <input
+              type="number"
+              value={config?.no_credential_quota ?? ''}
+              onChange={(e) => setConfig({ ...config, no_credential_quota: e.target.value === '' ? '' : parseInt(e.target.value) })}
+              className="w-full bg-gray-700 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+            />
+            {config?.no_credential_quota > 0 && (
+              <p className="text-amber-400 text-sm mt-2">
+                ⚠️ 当前设置：无凭证用户最多 {config.no_credential_quota} 次/天
+              </p>
+            )}
           </div>
 
           {/* 凭证奖励 */}

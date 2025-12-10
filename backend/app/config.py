@@ -32,7 +32,8 @@ class Settings(BaseSettings):
     gemini_api_base: str = "https://generativelanguage.googleapis.com"
     
     # 用户配额
-    default_daily_quota: int = 100
+    default_daily_quota: int = 100  # 新用户默认配额
+    no_credential_quota: int = 0    # 无有效凭证用户的配额上限（0=无限制，使用用户自己的配额）
     
     # 凭证奖励：每上传一个凭证增加的额度
     credential_reward_quota: int = 1000
@@ -87,6 +88,7 @@ PERSISTENT_CONFIG_KEYS = [
     "discord_only_registration",
     "discord_oauth_only", 
     "default_daily_quota",
+    "no_credential_quota",
     "credential_reward_quota",
     "base_rpm",
     "contributor_rpm",

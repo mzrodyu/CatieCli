@@ -54,7 +54,20 @@ async def get_user_from_api_key(request: Request, db: AsyncSession = Depends(get
     )
     today_usage = result.scalar() or 0
     
-    if today_usage >= user.daily_quota:
+    # 确定有效配额：如果设置了无凭证用户配额限制，检查用户是否有有效凭证
+    effective_quota = user.daily_quota
+    if settings.no_credential_quota > 0:
+        from app.models.user import Credential
+        cred_result = await db.execute(
+            select(func.count(Credential.id))
+            .where(Credential.user_id == user.id)
+            .where(Credential.is_active == True)
+        )
+        has_credential = (cred_result.scalar() or 0) > 0
+        if not has_credential:
+            effective_quota = min(user.daily_quota, settings.no_credential_quota)
+    
+    if today_usage >= effective_quota:
         raise HTTPException(status_code=429, detail="已达到今日配额限制")
     
     return user
