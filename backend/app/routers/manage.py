@@ -345,11 +345,8 @@ async def verify_all_credentials(
                     print(f"[检测] {cred.email} 检测账号类型失败: {e}", flush=True)
             
             cred.is_active = is_valid
-            # Pro 账户直接标记为 tier 3，否则根据模型检测结果
-            if account_type == "pro":
-                cred.model_tier = "3"
-            else:
-                cred.model_tier = "3" if supports_3 else "2.5"
+            # 根据实际模型检测结果设置 tier（Pro 是账号类型，不代表支持 3.0）
+            cred.model_tier = "3" if supports_3 else "2.5"
             # 暂时存储在 last_error 字段（后续可以添加专用字段）
             if account_type != "unknown":
                 cred.last_error = f"account_type:{account_type}"
