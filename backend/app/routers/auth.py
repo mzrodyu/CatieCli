@@ -299,88 +299,50 @@ async def upload_credentials(
             # 创建凭证（加密存储）
             email = cred_data.get("email") or file.filename
             project_id = cred_data.get("project_id", "")
+            raw_refresh_token = cred_data.get("refresh_token")
             
-            # 自动验证凭证有效性
-            is_valid = False
-            model_tier = "2.5"
-            verify_msg = ""
-            
-            try:
-                import httpx
-                from app.services.credential_pool import CredentialPool
-                
-                # 创建临时凭证对象用于获取 token
-                temp_cred = Credential(
-                    api_key=encrypt_credential(cred_data.get("token") or cred_data.get("access_token", "")),
-                    refresh_token=encrypt_credential(cred_data.get("refresh_token")),
-                    credential_type="oauth"
-                )
-                
-                access_token = await CredentialPool.get_access_token(temp_cred, db)
-                if access_token:
-                    async with httpx.AsyncClient(timeout=15) as client:
-                        # 使用 cloudcode-pa 端点测试（与 gcli2api 一致）
-                        test_url = "https://cloudcode-pa.googleapis.com/v1internal:generateContent"
-                        headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
-                        
-                        # 先测试 3.0（优先）
-                        test_payload_3 = {
-                            "model": "gemini-2.5-pro",
-                            "project": project_id,
-                            "request": {"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}
-                        }
-                        resp = await client.post(test_url, headers=headers, json=test_payload_3)
-                        if resp.status_code == 200:
-                            is_valid = True
-                            model_tier = "3"
-                            verify_msg = f"✅ 有效 (等级: 3)"
-                        elif resp.status_code == 429:
-                            is_valid = True
-                            model_tier = "3"
-                            verify_msg = f"✅ 有效但配额用尽(429) (等级: 3)"
-                        else:
-                            # 3.0 失败，再测试 2.5
-                            test_payload_25 = {
-                                "model": "gemini-2.5-flash",
-                                "project": project_id,
-                                "request": {"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}
-                            }
-                            resp = await client.post(test_url, headers=headers, json=test_payload_25)
-                            if resp.status_code == 200:
-                                is_valid = True
-                                model_tier = "2.5"
-                                verify_msg = f"✅ 有效 (等级: 2.5)"
-                            elif resp.status_code == 429:
-                                is_valid = True
-                                model_tier = "2.5"
-                                verify_msg = f"✅ 有效但配额用尽(429) (等级: 2.5)"
-                            else:
-                                verify_msg = f"❌ 无效 ({resp.status_code})"
-                else:
-                    verify_msg = "❌ 无法获取 token"
-            except Exception as e:
-                verify_msg = f"⚠️ 验证失败: {str(e)[:30]}"
-            
-            # 如果要捐赠但凭证无效，不允许
-            actual_public = is_public and is_valid
-            
+            # 检查 refresh_token 是否已存在（去重）
+            encrypted_refresh_token = encrypt_credential(raw_refresh_token)
+            existing_cred = await db.execute(
+                select(Credential).where(Credential.refresh_token == encrypted_refresh_token).limit(1)
+            )
+            if existing_cred.scalar_one_or_none():
+                results.append({"filename": file.filename, "status": "info", "message": "凭证已存在，跳过"})
+                continue
+
+            # 创建凭证对象（但不立即提交）
             credential = Credential(
                 user_id=user.id,
                 name=f"Upload - {email}",
                 api_key=encrypt_credential(cred_data.get("token") or cred_data.get("access_token", "")),
-                refresh_token=encrypt_credential(cred_data.get("refresh_token")),
+                refresh_token=encrypted_refresh_token,
                 project_id=project_id,
                 credential_type="oauth",
                 email=email,
-                is_public=actual_public,
-                is_active=is_valid,
-                model_tier=model_tier
+                is_public=is_public, # 初始状态
             )
             db.add(credential)
+            await db.flush() # 分配 ID
             
-            status_msg = f"上传成功 {verify_msg}"
+            # 使用统一函数进行验证
+            from app.services.credential_pool import CredentialPool
+            verify_result = await CredentialPool.verify_credential_capabilities(credential, db)
+            
+            # 根据验证结果更新状态
+            is_valid = verify_result.get("is_valid", False)
+            model_tier = verify_result.get("model_tier", "2.5")
+            
+            credential.is_active = is_valid
+            credential.model_tier = model_tier
             if is_public and not is_valid:
-                status_msg += " (无效凭证不会捐赠)"
+                credential.is_public = False # 无效凭证不能捐赠
+            
+            status_msg = f"上传成功: {'✅ 有效' if is_valid else '❌ 无效'}"
+            if is_valid:
+                status_msg += f" (等级: {model_tier})"
+            if verify_result.get("error"):
+                status_msg += f" ({verify_result.get('error')})"
+
             results.append({"filename": file.filename, "status": "success" if is_valid else "warning", "message": status_msg})
             success_count += 1
             
@@ -527,141 +489,19 @@ async def verify_my_credential(
     db: AsyncSession = Depends(get_db)
 ):
     """验证我的凭证有效性和模型等级"""
-    import httpx
     from app.services.credential_pool import CredentialPool
     
-    try:
-        print(f"[凭证检测] 开始检测凭证 {cred_id}", flush=True)
-        
-        result = await db.execute(
-            select(Credential).where(Credential.id == cred_id, Credential.user_id == user.id)
-        )
-        cred = result.scalar_one_or_none()
-        if not cred:
-            return {"is_valid": False, "model_tier": "2.5", "error": "凭证不存在", "supports_3": False}
-        
-        print(f"[凭证检测] 凭证 {cred.email} 开始获取 token", flush=True)
-        
-        # 获取 access token
-        try:
-            access_token = await CredentialPool.get_access_token(cred, db)
-        except Exception as e:
-            print(f"[凭证检测] 获取 token 异常: {e}", flush=True)
-            cred.is_active = False
-            cred.last_error = f"获取 token 异常: {str(e)[:50]}"
-            await db.commit()
-            return {
-                "is_valid": False,
-                "model_tier": cred.model_tier or "2.5",
-                "error": f"获取 token 异常: {str(e)[:50]}",
-                "supports_3": False
-            }
-        
-        if not access_token:
-            cred.is_active = False
-            cred.last_error = "无法获取 access token"
-            await db.commit()
-            return {
-                "is_valid": False,
-                "model_tier": cred.model_tier or "2.5",
-                "error": "无法获取 access token",
-                "supports_3": False
-            }
-        
-        print(f"[凭证检测] 获取到 token，开始测试", flush=True)
-        
-        # 先检测账号类型（无论 API 是否可用）
-        account_type = "unknown"
-        type_result = None
-        if cred.project_id:
-            try:
-                type_result = await CredentialPool.detect_account_type(access_token, cred.project_id)
-                account_type = type_result.get("account_type", "unknown")
-                print(f"[凭证检测] 账号类型检测结果: {type_result}", flush=True)
-            except Exception as e:
-                print(f"[凭证检测] 检测账号类型失败: {e}", flush=True)
-        
-        # 测试 Gemini API
-        is_valid = False
-        supports_3 = False
-        error_msg = None
-        
-        async with httpx.AsyncClient(timeout=15) as client:
-            # 使用 cloudcode-pa 端点测试（与 gcli2api 一致）
-            try:
-                test_url = "https://cloudcode-pa.googleapis.com/v1internal:generateContent"
-                headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
-                
-                # 先测试 3.0（优先）
-                test_payload_3 = {
-                    "model": "gemini-2.5-pro",
-                    "project": cred.project_id or "",
-                    "request": {"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}
-                }
-                resp = await client.post(test_url, headers=headers, json=test_payload_3)
-                print(f"[凭证检测] gemini-2.5-pro 响应: {resp.status_code}", flush=True)
-                
-                if resp.status_code == 200:
-                    is_valid = True
-                    supports_3 = True
-                elif resp.status_code == 429:
-                    is_valid = True
-                    supports_3 = True
-                    error_msg = "配额已用尽 (429)"
-                else:
-                    # 3.0 失败，再测试 2.5
-                    test_payload_25 = {
-                        "model": "gemini-2.5-flash",
-                        "project": cred.project_id or "",
-                        "request": {"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}
-                    }
-                    resp = await client.post(test_url, headers=headers, json=test_payload_25)
-                    print(f"[凭证检测] gemini-2.5-flash 响应: {resp.status_code}", flush=True)
-                    
-                    if resp.status_code == 200:
-                        is_valid = True
-                        supports_3 = False
-                    elif resp.status_code == 429:
-                        is_valid = True
-                        supports_3 = False
-                        error_msg = "配额已用尽 (429)"
-                    elif resp.status_code in [401, 403]:
-                        error_msg = f"认证失败 ({resp.status_code})"
-                    else:
-                        error_msg = f"API 返回 {resp.status_code}"
-            except Exception as e:
-                error_msg = f"请求异常: {str(e)[:30]}"
-        
-        # 更新凭证状态
-        cred.is_active = is_valid
-        cred.model_tier = "3" if supports_3 else "2.5"
-        if error_msg:
-            cred.last_error = error_msg
-        elif account_type != "unknown":
-            cred.last_error = f"account_type:{account_type}"
-        await db.commit()
-        
-        # 获取存储空间信息
-        storage_gb = type_result.get("storage_gb") if type_result else None
-        
-        print(f"[凭证检测] 完成: valid={is_valid}, tier={cred.model_tier}, type={account_type}, storage={storage_gb}GB", flush=True)
-        
-        return {
-            "is_valid": is_valid,
-            "model_tier": cred.model_tier,
-            "supports_3": supports_3,
-            "account_type": account_type,
-            "storage_gb": storage_gb,
-            "error": error_msg
-        }
-    except Exception as e:
-        print(f"[凭证检测] 严重异常: {e}", flush=True)
-        return {
-            "is_valid": False,
-            "model_tier": "2.5",
-            "error": f"检测异常: {str(e)[:50]}",
-            "supports_3": False
-        }
+    result = await db.execute(
+        select(Credential).where(Credential.id == cred_id, Credential.user_id == user.id)
+    )
+    cred = result.scalar_one_or_none()
+    if not cred:
+        raise HTTPException(status_code=404, detail="凭证不存在")
+
+    # 使用统一的验证函数
+    verify_result = await CredentialPool.verify_credential_capabilities(cred, db)
+    
+    return verify_result
 
 
 # ===== Discord Bot API =====

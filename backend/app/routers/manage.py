@@ -74,22 +74,45 @@ async def batch_credential_action(
         raise HTTPException(status_code=400, detail="未选择凭证")
     
     if action == "enable":
-        await db.execute(
-            update(Credential).where(Credential.id.in_(ids)).values(is_active=True)
-        )
+        from app.services.credential_pool import CredentialPool
+        creds_to_check = await db.execute(select(Credential).where(Credential.id.in_(ids)))
+        
+        success_count = 0
+        fail_count = 0
+        details = []
+
+        for cred in creds_to_check.scalars().all():
+            verify_result = await CredentialPool.verify_credential_capabilities(cred, db)
+            if verify_result.get("is_valid"):
+                success_count += 1
+                details.append({"id": cred.id, "email": cred.email, "status": "success", "message": "已启用"})
+            else:
+                fail_count += 1
+                error_msg = verify_result.get('error', '验证失败')
+                details.append({"id": cred.id, "email": cred.email, "status": "fail", "message": error_msg})
+        
+        await db.commit()
+        return {
+            "message": f"批量启用完成：{success_count} 个成功, {fail_count} 个失败",
+            "details": details
+        }
+
     elif action == "disable":
         await db.execute(
             update(Credential).where(Credential.id.in_(ids)).values(is_active=False)
         )
+        await db.commit()
+        return {"message": f"已对 {len(ids)} 个凭证执行禁用操作"}
+
     elif action == "delete":
         result = await db.execute(select(Credential).where(Credential.id.in_(ids)))
         for cred in result.scalars().all():
             await db.delete(cred)
+        await db.commit()
+        return {"message": f"已对 {len(ids)} 个凭证执行删除操作"}
+        
     else:
         raise HTTPException(status_code=400, detail="无效的操作")
-    
-    await db.commit()
-    return {"message": f"已对 {len(ids)} 个凭证执行 {action} 操作"}
 
 
 @router.get("/credentials/export")
@@ -133,14 +156,31 @@ async def toggle_credential(
     """切换凭证启用/禁用状态"""
     result = await db.execute(select(Credential).where(Credential.id == credential_id))
     cred = result.scalar_one_or_none()
-    
+
     if not cred:
         raise HTTPException(status_code=404, detail="凭证不存在")
-    
-    cred.is_active = not cred.is_active
-    await db.commit()
-    
-    return {"message": f"凭证已{'启用' if cred.is_active else '禁用'}", "is_active": cred.is_active}
+
+    # 如果是要启用凭证，则强制验证
+    if not cred.is_active:
+        from app.services.credential_pool import CredentialPool
+        print(f"[Admin Toggle] 正在验证凭证 {cred.id}...", flush=True)
+        verify_result = await CredentialPool.verify_credential_capabilities(cred, db)
+        
+        if not verify_result.get("is_valid"):
+            await db.commit() # 保存验证过程中可能产生的错误信息
+            raise HTTPException(
+                status_code=400,
+                detail=f"启用失败：凭证验证无效。原因: {verify_result.get('error', '未知错误')}"
+            )
+        
+        # 验证通过，cred.is_active 会在 verify_credential_capabilities 中被设为 True
+        await db.commit()
+        return {"message": "凭证已验证并启用", "is_active": True}
+    else:
+        # 如果是禁用凭证，则直接禁用
+        cred.is_active = False
+        await db.commit()
+        return {"message": "凭证已禁用", "is_active": False}
 
 
 @router.post("/credentials/{credential_id}/donate")
@@ -194,89 +234,18 @@ async def verify_credential(
     db: AsyncSession = Depends(get_db)
 ):
     """验证凭证有效性和模型等级"""
-    import httpx
     from app.services.credential_pool import CredentialPool
-    from app.services.crypto import decrypt_credential
     
     result = await db.execute(select(Credential).where(Credential.id == credential_id))
     cred = result.scalar_one_or_none()
     
     if not cred:
         raise HTTPException(status_code=404, detail="凭证不存在")
+
+    # 使用统一的验证函数
+    verify_result = await CredentialPool.verify_credential_capabilities(cred, db)
     
-    # 获取 access token
-    access_token = await CredentialPool.get_access_token(cred, db)
-    if not access_token:
-        cred.is_active = False
-        cred.last_error = "无法获取 access token"
-        await db.commit()
-        return {
-            "is_valid": False,
-            "model_tier": cred.model_tier,
-            "error": "无法获取 access token",
-            "supports_3": False
-        }
-    
-    # 测试 Gemini 2.5
-    is_valid = False
-    supports_3 = False
-    error_msg = None
-    
-    async with httpx.AsyncClient(timeout=15) as client:
-        # 使用 cloudcode-pa 端点测试（与 gcli2api 一致）
-        try:
-            test_url = "https://cloudcode-pa.googleapis.com/v1internal:generateContent"
-            headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
-            
-            # 先测试 3.0（优先）
-            test_payload_3 = {
-                "model": "gemini-2.5-pro",
-                "project": cred.project_id or "",
-                "request": {"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}
-            }
-            resp3 = await client.post(test_url, headers=headers, json=test_payload_3)
-            if resp3.status_code == 200:
-                is_valid = True
-                supports_3 = True
-            elif resp3.status_code == 429:
-                is_valid = True
-                supports_3 = True
-                error_msg = "配额已用尽 (429)"
-            else:
-                # 3.0 失败，再测试 2.5
-                test_payload_25 = {
-                    "model": "gemini-2.5-flash",
-                    "project": cred.project_id or "",
-                    "request": {"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}
-                }
-                resp25 = await client.post(test_url, headers=headers, json=test_payload_25)
-                if resp25.status_code == 200:
-                    is_valid = True
-                    supports_3 = False
-                elif resp25.status_code == 429:
-                    is_valid = True
-                    supports_3 = False
-                    error_msg = "配额已用尽 (429)"
-                elif resp25.status_code in [401, 403]:
-                    error_msg = f"认证失败 ({resp25.status_code})"
-                else:
-                    error_msg = f"API 返回 {resp25.status_code}"
-        except Exception as e:
-            error_msg = f"请求异常: {str(e)[:30]}"
-    
-    # 更新凭证状态
-    cred.is_active = is_valid
-    cred.model_tier = "3" if supports_3 else "2.5"
-    if error_msg:
-        cred.last_error = error_msg
-    await db.commit()
-    
-    return {
-        "is_valid": is_valid,
-        "model_tier": cred.model_tier,
-        "supports_3": supports_3,
-        "error": error_msg
-    }
+    return verify_result
 
 
 @router.post("/credentials/verify-all")
@@ -285,7 +254,6 @@ async def verify_all_credentials(
     db: AsyncSession = Depends(get_db)
 ):
     """一键检测所有凭证（包括账号类型检测）"""
-    import httpx
     from app.services.credential_pool import CredentialPool
     
     result = await db.execute(select(Credential))
@@ -295,94 +263,36 @@ async def verify_all_credentials(
     
     for cred in creds:
         try:
-            access_token = await CredentialPool.get_access_token(cred, db)
-            if not access_token:
-                cred.is_active = False
-                db.add(cred)
-                results["invalid"] += 1
-                results["details"].append({"id": cred.id, "email": cred.email, "status": "invalid", "reason": "无法获取 token"})
-                continue
+            verify_result = await CredentialPool.verify_credential_capabilities(cred, db)
             
-            is_valid = False
-            supports_3 = False
-            account_type = "unknown"
-            
-            async with httpx.AsyncClient(timeout=15) as client:
-                test_url = "https://cloudcode-pa.googleapis.com/v1internal:generateContent"
-                headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
-                
-                # 先测试 2.5 验证凭证有效性
-                test_payload_25 = {
-                    "model": "gemini-2.5-flash",
-                    "project": cred.project_id or "",
-                    "request": {"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}
-                }
-                resp = await client.post(test_url, headers=headers, json=test_payload_25)
-                if resp.status_code == 200 or resp.status_code == 429:
-                    is_valid = True
-                    
-                    # 凭证有效，再测试是否支持 3.0 模型
-                    test_payload_3 = {
-                        "model": "gemini-3-pro-preview",
-                        "project": cred.project_id or "",
-                        "request": {"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}
-                    }
-                    resp_3 = await client.post(test_url, headers=headers, json=test_payload_3)
-                    if resp_3.status_code == 200 or resp_3.status_code == 429:
-                        supports_3 = True
-                        print(f"[检测] {cred.email} 支持 3.0 模型", flush=True)
-                    else:
-                        supports_3 = False
-                        print(f"[检测] {cred.email} 不支持 3.0 模型 (status={resp_3.status_code})", flush=True)
-            
-            # 检测账号类型（Pro/Free）
-            if is_valid and cred.project_id:
-                try:
-                    type_result = await CredentialPool.detect_account_type(access_token, cred.project_id)
-                    account_type = type_result.get("account_type", "unknown")
-                    print(f"[检测] {cred.email}: account_type={account_type}, result={type_result}", flush=True)
-                except Exception as e:
-                    print(f"[检测] {cred.email} 检测账号类型失败: {e}", flush=True)
-            
-            cred.is_active = is_valid
-            # Pro 账户直接标记为 tier 3，否则根据模型检测结果
-            if account_type == "pro":
-                cred.model_tier = "3"
-            else:
-                cred.model_tier = "3" if supports_3 else "2.5"
-            # 暂时存储在 last_error 字段（后续可以添加专用字段）
-            if account_type != "unknown":
-                cred.last_error = f"account_type:{account_type}"
-            
-            # 确保变更被追踪并立即写入
-            print(f"[检测] 设置 {cred.email} model_tier={cred.model_tier}, account_type={account_type}, supports_3={supports_3}", flush=True)
-            await db.merge(cred)
-            await db.flush()
+            is_valid = verify_result.get("is_valid", False)
+            model_tier = verify_result.get("model_tier", "2.5")
+            account_type = verify_result.get("account_type", "unknown")
             
             if is_valid:
                 results["valid"] += 1
-                if supports_3:
+                if model_tier == "3":
                     results["tier3"] += 1
                 if account_type == "pro":
                     results["pro"] += 1
-                reason = "配额用尽(429)" if resp.status_code == 429 else None
+                
                 results["details"].append({
-                    "id": cred.id, 
-                    "email": cred.email, 
-                    "status": "valid", 
-                    "tier": cred.model_tier,
+                    "id": cred.id,
+                    "email": cred.email,
+                    "status": "valid",
+                    "tier": model_tier,
                     "account_type": account_type,
-                    "note": reason
+                    "note": verify_result.get("error")
                 })
             else:
                 results["invalid"] += 1
-                results["details"].append({"id": cred.id, "email": cred.email, "status": "invalid", "reason": f"API 返回 {resp.status_code}"})
+                results["details"].append({"id": cred.id, "email": cred.email, "status": "invalid", "reason": verify_result.get("error", "未知错误")})
+
         except Exception as e:
-            cred.is_active = False
-            db.add(cred)
             results["invalid"] += 1
             results["details"].append({"id": cred.id, "email": cred.email, "status": "error", "reason": str(e)[:50]})
     
+    # 最终提交所有更改
     await db.commit()
     return results
 
@@ -670,6 +580,7 @@ async def get_config(user: User = Depends(get_current_admin)):
         "announcement_title": settings.announcement_title,
         "announcement_content": settings.announcement_content,
         "announcement_read_seconds": settings.announcement_read_seconds,
+        "validation_model": settings.validation_model,
     }
 
 
@@ -698,6 +609,7 @@ async def update_config(
     contributor_rpm: Optional[int] = Form(None),
     error_retry_count: Optional[int] = Form(None),
     credential_pool_mode: Optional[str] = Form(None),
+    validation_model: Optional[str] = Form(None),
     announcement_enabled: Optional[bool] = Form(None),
     announcement_title: Optional[str] = Form(None),
     announcement_content: Optional[str] = Form(None),
@@ -747,6 +659,10 @@ async def update_config(
         settings.error_retry_count = error_retry_count
         await save_config_to_db("error_retry_count", error_retry_count)
         updated["error_retry_count"] = error_retry_count
+    if validation_model is not None:
+        settings.validation_model = validation_model
+        await save_config_to_db("validation_model", validation_model)
+        updated["validation_model"] = validation_model
     
     # 公告配置
     if announcement_enabled is not None:

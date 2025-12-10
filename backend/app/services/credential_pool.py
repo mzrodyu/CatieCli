@@ -75,20 +75,29 @@ class CredentialPool:
             query = query.where(Credential.user_id == user_id)
         
         elif pool_mode == "tier3_shared":
-            # 3.0共享模式：有3.0凭证的用户可用公共3.0池
-            user_has_tier3 = await CredentialPool.check_user_has_tier3_creds(db, user_id)
-            
-            if required_tier == "3" and user_has_tier3:
-                # 请求3.0模型且用户有3.0凭证 → 可用公共3.0池
+            # 3.0共享模式
+            if required_tier == "3":
+                # 请求 3.0 模型：检查用户是否有 3.0 凭证
+                user_has_tier3 = await CredentialPool.check_user_has_tier3_creds(db, user_id)
+                if user_has_tier3:
+                    # 有 3.0 凭证，可以用公共 3.0 池 + 自己的
+                    query = query.where(
+                        or_(
+                            Credential.is_public == True,
+                            Credential.user_id == user_id
+                        )
+                    )
+                else:
+                    # 没有 3.0 凭证，只能用自己的
+                    query = query.where(Credential.user_id == user_id)
+            else:
+                # 请求 2.5 模型：无条件允许使用所有公共池 + 自己的
                 query = query.where(
                     or_(
                         Credential.is_public == True,
                         Credential.user_id == user_id
                     )
                 )
-            else:
-                # 其他情况只能用自己的凭证
-                query = query.where(Credential.user_id == user_id)
         
         else:  # full_shared (大锅饭模式)
             if user_has_public_creds:
@@ -262,6 +271,107 @@ class CredentialPool:
         await db.refresh(credential)
         return credential
     
+    @staticmethod
+    async def verify_credential_capabilities(cred: Credential, db: AsyncSession) -> dict:
+        """
+        统一的凭证能力检测函数
+        - 检测有效性
+        - 检测模型等级 (3.0 / 2.5)，严格检查 modelVersion 防止回退
+        - 检测账号类型 (pro / free)
+        - 更新数据库中的凭证状态
+        """
+        import httpx
+        
+        access_token = await CredentialPool.get_access_token(cred, db)
+        if not access_token:
+            cred.is_active = False
+            cred.last_error = "无法获取 access token"
+            await db.commit()
+            return {"is_valid": False, "model_tier": "2.5", "supports_3": False, "account_type": "unknown", "error": "无法获取 access token"}
+
+        is_valid = False
+        supports_3 = False
+        account_type = "unknown"
+        error_msg = None
+        storage_gb = None
+
+        # 1. 检测账号类型
+        if cred.project_id:
+            try:
+                type_result = await CredentialPool.detect_account_type(access_token, cred.project_id)
+                account_type = type_result.get("account_type", "unknown")
+                storage_gb = type_result.get("storage_gb")
+            except Exception as e:
+                print(f"[能力检测] 检测账号类型失败: {e}", flush=True)
+
+        # 2. 检测模型能力（分步确认）
+        async with httpx.AsyncClient(timeout=20) as client:
+            test_url = "https://cloudcode-pa.googleapis.com/v1internal:generateContent"
+            headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+            
+            # 步骤一：基础有效性验证
+            try:
+                base_validation_payload = {
+                    "model": settings.validation_model,
+                    "project": cred.project_id or "",
+                    "request": {"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}
+                }
+                resp_base = await client.post(test_url, headers=headers, json=base_validation_payload)
+                
+                if resp_base.status_code in [200, 429]:
+                    is_valid = True
+                    if resp_base.status_code == 429:
+                        error_msg = "配额已用尽 (429)"
+                else:
+                    error_msg = f"基础验证失败 ({resp_base.status_code})"
+
+            except Exception as e:
+                error_msg = f"基础验证请求异常: {str(e)[:30]}"
+
+            # 步骤二：如果基础验证通过，则进行 3.0 能力探测
+            if is_valid:
+                try:
+                    test_payload_3 = {
+                        "model": "gemini-3-pro-preview",
+                        "project": cred.project_id or "",
+                        "request": {"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}
+                    }
+                    resp_3 = await client.post(test_url, headers=headers, json=test_payload_3)
+                    
+                    if resp_3.status_code == 200:
+                        data = resp_3.json()
+                        model_version = data.get("modelVersion", "")
+                        if "gemini-3" in model_version:
+                            supports_3 = True
+                        
+                except Exception as e:
+                    print(f"[能力检测] 3.0 探测异常: {e}", flush=True)
+
+        # 3. 整合结果并更新数据库
+        cred.is_active = is_valid
+        cred.model_tier = "3" if supports_3 else "2.5"
+        
+        # 4. 如果不支持 3.0，则强制将账号类型降级为 free
+        final_account_type = account_type
+        if not supports_3 and account_type == "pro":
+            final_account_type = "free"
+
+        if error_msg:
+            cred.last_error = error_msg
+        elif final_account_type != "unknown":
+            cred.last_error = f"account_type:{final_account_type}"
+        
+        await db.commit()
+
+        return {
+            "is_valid": is_valid,
+            "model_tier": cred.model_tier,
+            "supports_3": supports_3,
+            "account_type": final_account_type,
+            "storage_gb": storage_gb,
+            "error": error_msg
+        }
+
     @staticmethod
     async def detect_account_type(access_token: str, project_id: str) -> dict:
         """

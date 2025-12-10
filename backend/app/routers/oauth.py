@@ -125,11 +125,14 @@ async def oauth_callback(
     state_data = oauth_states.pop(state, None)
     if not state_data:
         return RedirectResponse(url="/dashboard?error=invalid_state")
-    
+
+    user_id = state_data.get("user_id")
+    if not user_id:
+        return RedirectResponse(url="/dashboard?error=no_user_associated")
+
     try:
-        # 获取 access token (使用 Gemini CLI 官方 redirect_uri)
+        # 获取 access token
         redirect_uri = "http://localhost:8080"
-        
         async with httpx.AsyncClient() as client:
             token_response = await client.post(
                 GOOGLE_TOKEN_URL,
@@ -142,13 +145,14 @@ async def oauth_callback(
                 }
             )
             token_data = token_response.json()
-        
+
         if "error" in token_data:
-            return RedirectResponse(url=f"/dashboard?error={token_data.get('error_description', 'token_error')}")
-        
+            error_msg = token_data.get('error_description', 'token_error')
+            return RedirectResponse(url=f"/dashboard?error={quote(error_msg)}")
+
         access_token = token_data.get("access_token")
         refresh_token = token_data.get("refresh_token")
-        
+
         # 获取用户信息
         async with httpx.AsyncClient() as client:
             userinfo_response = await client.get(
@@ -156,24 +160,62 @@ async def oauth_callback(
                 headers={"Authorization": f"Bearer {access_token}"}
             )
             userinfo = userinfo_response.json()
-        
         email = userinfo.get("email", "unknown")
-        
-        # 保存凭证
+
+        # 获取项目ID并启用API
+        project_id = ""
+        try:
+            async with httpx.AsyncClient() as client:
+                projects_response = await client.get(
+                    "https://cloudresourcemanager.googleapis.com/v1/projects",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    params={"filter": "lifecycleState:ACTIVE"}
+                )
+                projects_data = projects_response.json()
+                projects = projects_data.get("projects", [])
+                if projects:
+                    project_id = projects[0].get("projectId", "")
+                    # 自动启用服务
+                    for service in ["geminicloudassist.googleapis.com", "cloudaicompanion.googleapis.com"]:
+                        await client.post(
+                            f"https://serviceusage.googleapis.com/v1/projects/{project_id}/services/{service}:enable",
+                            headers={"Authorization": f"Bearer {access_token}"}
+                        )
+        except Exception as e:
+            print(f"获取项目或启用服务失败: {e}", flush=True)
+
+        # 加密并保存凭证
+        from app.services.crypto import encrypt_credential
         credential = Credential(
+            user_id=user_id,
             name=f"OAuth - {email}",
-            api_key=access_token,  # 这里存储的是 access_token
-            refresh_token=refresh_token,
+            api_key=encrypt_credential(access_token),
+            refresh_token=encrypt_credential(refresh_token),
+            project_id=project_id,
             credential_type="oauth",
-            email=email
+            email=email,
+            is_public=False # 默认为私有
         )
-        db.add(credential)
-        await db.commit()
         
-        return RedirectResponse(url="/dashboard?oauth=success")
-    
+        # 验证凭证能力
+        from app.services.credential_pool import CredentialPool
+        db.add(credential)
+        await db.flush()
+        verify_result = await CredentialPool.verify_credential_capabilities(credential, db)
+
+        credential.is_active = verify_result.get("is_valid", False)
+        credential.model_tier = verify_result.get("model_tier", "2.5")
+        
+        await db.commit()
+
+        if credential.is_active:
+            return RedirectResponse(url=f"/dashboard?oauth=success&tier={credential.model_tier}")
+        else:
+            error_msg = verify_result.get("error", "凭证无效")
+            return RedirectResponse(url=f"/dashboard?oauth=fail&error={quote(error_msg)}")
+
     except Exception as e:
-        return RedirectResponse(url=f"/dashboard?oauth=error&msg={str(e)[:50]}")
+        return RedirectResponse(url=f"/dashboard?oauth=error&msg={quote(str(e)[:50])}")
 
 
 @router.post("/from-callback-url")
@@ -291,49 +333,20 @@ async def credential_from_callback_url(
             is_public=data.is_public  # 是否捐赠到公共池
         )
         
-        # 验证凭证是否有效（尝试调用 API）
-        is_valid = True
-        detected_tier = "2.5"
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as test_client:
-                # 用简单请求测试凭证有效性
-                test_url = "https://cloudcode-pa.googleapis.com/v1internal:generateContent"
-                test_payload = {
-                    "model": "gemini-2.5-flash",
-                    "project": project_id,
-                    "request": {"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}
-                }
-                test_response = await test_client.post(
-                    test_url,
-                    headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
-                    json=test_payload
-                )
-                if test_response.status_code == 200:
-                    print(f"[凭证验证] ✅ 凭证有效", flush=True)
-                    # 测试 3.0 模型资格
-                    test_payload_3 = {
-                        "model": "gemini-3-pro-preview",
-                        "project": project_id,
-                        "request": {"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}
-                    }
-                    test_response_3 = await test_client.post(
-                        test_url,
-                        headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
-                        json=test_payload_3
-                    )
-                    if test_response_3.status_code == 200:
-                        detected_tier = "3"
-                        print(f"[凭证验证] 🎉 检测到 Gemini 3 资格！", flush=True)
-                elif test_response.status_code in [401, 403]:
-                    is_valid = False
-                    print(f"[凭证验证] ❌ 凭证无效: {test_response.status_code}", flush=True)
-        except Exception as ve:
-            print(f"[凭证验证] ⚠️ 验证失败: {ve}", flush=True)
-        
-        credential.model_tier = detected_tier
-        credential.is_active = is_valid  # 无效凭证自动禁用
-        
+        # 使用统一函数进行验证
+        from app.services.credential_pool import CredentialPool
         db.add(credential)
+        await db.flush() # 分配ID
+        verify_result = await CredentialPool.verify_credential_capabilities(credential, db)
+        
+        is_valid = verify_result.get("is_valid", False)
+        detected_tier = verify_result.get("model_tier", "2.5")
+        
+        # 根据验证结果更新状态
+        credential.is_active = is_valid
+        credential.model_tier = detected_tier
+        if data.is_public and not is_valid:
+            credential.is_public = False
         
         # 奖励用户额度（如果捐赠到公共池且凭证有效）
         reward_quota = 0
@@ -486,34 +499,19 @@ async def credential_from_callback_url_discord(
             is_public=data.is_public
         )
         
-        # 验证凭证
-        is_valid = True
-        detected_tier = "2.5"
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as test_client:
-                test_url = "https://cloudcode-pa.googleapis.com/v1internal:generateContent"
-                test_response = await test_client.post(
-                    test_url,
-                    headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
-                    json={"model": "gemini-2.5-flash", "project": project_id, "request": {"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}}
-                )
-                if test_response.status_code == 200:
-                    # 测试 3.0
-                    test_3 = await test_client.post(
-                        test_url,
-                        headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
-                        json={"model": "gemini-2.5-pro", "project": project_id, "request": {"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}}
-                    )
-                    if test_3.status_code in [200, 429]:
-                        detected_tier = "3"
-                elif test_response.status_code in [401, 403]:
-                    is_valid = False
-        except:
-            pass
-        
-        credential.model_tier = detected_tier
-        credential.is_active = is_valid
+        # 使用统一函数进行验证
+        from app.services.credential_pool import CredentialPool
         db.add(credential)
+        await db.flush() # 分配ID
+        verify_result = await CredentialPool.verify_credential_capabilities(credential, db)
+        
+        is_valid = verify_result.get("is_valid", False)
+        detected_tier = verify_result.get("model_tier", "2.5")
+
+        credential.is_active = is_valid
+        credential.model_tier = detected_tier
+        if data.is_public and not is_valid:
+            credential.is_public = False
         
         # 奖励额度
         reward_quota = 0
