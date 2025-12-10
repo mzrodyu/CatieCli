@@ -13,6 +13,7 @@ import {
     RefreshCw,
     Settings,
     Shield,
+    Upload,
     Users,
     X,
     Zap
@@ -443,13 +444,22 @@ export default function Dashboard() {
           <>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">我的凭证</h2>
-              <Link 
-                to="/oauth"
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg flex items-center gap-2"
-              >
-                <ExternalLink size={16} />
-                获取新凭证
-              </Link>
+              <div className="flex gap-2">
+                <Link 
+                  to="/credentials"
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center gap-2"
+                >
+                  <Upload size={16} />
+                  上传凭证
+                </Link>
+                <Link 
+                  to="/oauth"
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg flex items-center gap-2"
+                >
+                  <ExternalLink size={16} />
+                  获取新凭证
+                </Link>
+              </div>
             </div>
 
             {credLoading ? (
