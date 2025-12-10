@@ -302,71 +302,44 @@ class CredentialPool:
         """
         检测账号类型（Pro/Free）
         
-        使用 cloudcode-pa 内部 API 进行并发测试：
-        - 普通号：并发请求容易触发 429
-        - Pro 号：并发请求不会触发 429
+        使用 Google Drive API 检测存储空间：
+        - Pro 账号: 2TB (2199023255552 bytes)
+        - 普通账号: 15GB (16106127360 bytes)
         
         Returns:
-            {"account_type": "pro"/"free"/"unknown", ...}
+            {"account_type": "pro"/"free"/"unknown", "storage_gb": float}
         """
-        import asyncio
-        
         headers = {
             "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json",
         }
         
-        # 使用内部 API (cloudcode-pa.googleapis.com)
-        url = "https://cloudcode-pa.googleapis.com/v1internal:generateContent"
-        payload = {
-            "model": "gemini-2.0-flash",
-            "project": project_id,
-            "request": {
-                "contents": [{"role": "user", "parts": [{"text": "1"}]}],
-                "generationConfig": {"maxOutputTokens": 1}
-            }
-        }
+        print(f"[检测账号] 使用 Drive API 检测存储空间...", flush=True)
         
-        print(f"[检测账号] 使用内部 API 检测账号类型...", flush=True)
-        
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            # 顺序发送请求，遇到 429 立即停止
-            success_count = 0
-            
-            for i in range(3):
-                try:
-                    resp = await client.post(url, headers=headers, json=payload)
-                    print(f"[检测账号] 第 {i+1} 次请求: {resp.status_code}", flush=True)
-                    
-                    if resp.status_code == 200:
-                        success_count += 1
-                    elif resp.status_code == 429:
-                        # 触发限速
-                        error_text = resp.text.lower()
-                        print(f"[检测账号] 429 详情: {resp.text[:200]}", flush=True)
-                        
-                        if "per day" in error_text or "daily" in error_text:
-                            # 每日配额用完
-                            print(f"[检测账号] ⚠️ 每日配额用完，无法判断", flush=True)
-                            return {"account_type": "unknown", "error": "配额已用尽"}
-                        else:
-                            # 每分钟限速 = 普通号
-                            print(f"[检测账号] ❌ 触发限速，判定为普号", flush=True)
-                            return {"account_type": "free", "method": "rate_limit"}
-                    elif resp.status_code in [401, 403]:
-                        print(f"[检测账号] 认证失败: {resp.status_code}", flush=True)
-                        return {"account_type": "unknown", "error": f"认证失败 ({resp.status_code})"}
-                    else:
-                        print(f"[检测账号] 未知错误: {resp.status_code}", flush=True)
-                        return {"account_type": "unknown", "error": f"API 错误 ({resp.status_code})"}
-                        
-                except Exception as e:
-                    print(f"[检测账号] 请求异常: {e}", flush=True)
-                    return {"account_type": "unknown", "error": str(e)}
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            try:
+                # 获取 Drive 存储配额
+                resp = await client.get(
+                    "https://www.googleapis.com/drive/v3/about?fields=storageQuota",
+                    headers=headers
+                )
                 
-                # 短暂等待
-                await asyncio.sleep(0.3)
-            
-            # 3 次全部成功 = Pro
-            print(f"[检测账号] ✅ 3 次全部成功，判定为 Pro", flush=True)
-            return {"account_type": "pro", "method": "rate_limit"}
+                if resp.status_code == 200:
+                    data = resp.json()
+                    quota = data.get("storageQuota", {})
+                    limit = int(quota.get("limit", 0))
+                    storage_gb = round(limit / (1024**3), 1)
+                    
+                    print(f"[检测账号] 存储空间: {storage_gb} GB", flush=True)
+                    
+                    # 2TB = 2048GB，Pro 账号
+                    if storage_gb >= 100:  # 100GB 以上认为是 Pro
+                        return {"account_type": "pro", "storage_gb": storage_gb}
+                    else:
+                        return {"account_type": "free", "storage_gb": storage_gb}
+                else:
+                    print(f"[检测账号] Drive API 错误: {resp.status_code}", flush=True)
+                    return {"account_type": "unknown", "error": f"Drive API 错误 ({resp.status_code})"}
+                    
+            except Exception as e:
+                print(f"[检测账号] 请求异常: {e}", flush=True)
+                return {"account_type": "unknown", "error": str(e)}
