@@ -519,8 +519,8 @@ export default function Dashboard() {
                       if (!confirm('确定要删除所有失效凭证吗？')) return
                       try {
                         const res = await api.delete('/api/auth/credentials/inactive/batch')
-                        alert(res.data.message)
-                        fetchCredentials()
+                        alert('我是奶龙，我把你的凭证吃掉了哦 🐉\n' + res.data.message)
+                        fetchMyCredentials()
                       } catch (err) {
                         alert(err.response?.data?.detail || '删除失败')
                       }
