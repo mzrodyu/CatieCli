@@ -380,7 +380,8 @@ class CredentialPool:
             print(f"[检测账号] 等待 2 秒后开始连续请求检测...", flush=True)
             await asyncio.sleep(2)
             
-            for i in range(3):  # 减少到 3 次
+            success_count = 0
+            for i in range(5):  # 增加到 5 次检测
                 try:
                     resp = await client.post(url, headers=headers, json=payload)
                     print(f"[检测账号] 第 {i+1} 次请求: {resp.status_code}", flush=True)
@@ -388,10 +389,16 @@ class CredentialPool:
                     if resp.status_code == 429:
                         error_text = resp.text.lower()
                         print(f"[检测账号] 429 详情: {resp.text[:200]}", flush=True)
-                        if "per day" not in error_text and "daily" not in error_text:
-                            return {"account_type": "free"}
-                        return {"account_type": "unknown", "error": "配额已用尽"}
-                    elif resp.status_code not in [200]:
+                        # 只有日配额用尽才能确定，RPM 限速不做判断
+                        if "per day" in error_text or "daily" in error_text:
+                            return {"account_type": "unknown", "error": "配额已用尽，无法判断"}
+                        # RPM 限速，等待后继续
+                        print(f"[检测账号] RPM 限速，等待后继续...", flush=True)
+                        await asyncio.sleep(3)
+                        continue
+                    elif resp.status_code == 200:
+                        success_count += 1
+                    else:
                         print(f"[检测账号] 非200响应: {resp.status_code}", flush=True)
                         return {"account_type": "unknown"}
                         
@@ -399,7 +406,12 @@ class CredentialPool:
                     print(f"[检测账号] 请求异常: {e}", flush=True)
                     return {"account_type": "unknown", "error": str(e)}
                 
-                await asyncio.sleep(1.5)  # 间隔增加到 1.5 秒
+                await asyncio.sleep(1.5)
             
-            print(f"[检测账号] 3 次请求全部成功，判定为 Pro", flush=True)
-            return {"account_type": "pro"}
+            # 5 次中至少 3 次成功才判定为 Pro
+            if success_count >= 3:
+                print(f"[检测账号] {success_count}/5 次请求成功，判定为 Pro", flush=True)
+                return {"account_type": "pro"}
+            else:
+                print(f"[检测账号] 只有 {success_count}/5 次成功，无法确定", flush=True)
+                return {"account_type": "unknown"}
