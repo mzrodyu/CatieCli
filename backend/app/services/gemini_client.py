@@ -54,7 +54,14 @@ class GeminiClient:
         print(f"[GeminiClient] 请求: model={model}, project={self.project_id}", flush=True)
         print(f"[GeminiClient] generationConfig: {generation_config}", flush=True)
         
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        # 使用更细粒度的超时配置，避免长时间生成时连接中断
+        timeout = httpx.Timeout(
+            connect=30.0,    # 连接超时
+            read=180.0,      # 读取超时（等待响应）
+            write=30.0,      # 写入超时
+            pool=30.0        # 连接池超时
+        )
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(url, headers=headers, json=payload)
             
             # 打印所有响应头（调试用）
