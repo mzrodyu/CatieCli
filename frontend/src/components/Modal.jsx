@@ -164,7 +164,6 @@ export function AlertModal({ isOpen, onClose, title, message, type = 'info' }) {
  */
 export function QuotaModal({ isOpen, onClose, onSubmit, title, defaultValues = {} }) {
   const [values, setValues] = useState({
-    daily_quota: defaultValues.daily_quota || 0,
     quota_flash: defaultValues.quota_flash || 0,
     quota_25pro: defaultValues.quota_25pro || 0,
     quota_30pro: defaultValues.quota_30pro || 0
@@ -173,7 +172,6 @@ export function QuotaModal({ isOpen, onClose, onSubmit, title, defaultValues = {
   useEffect(() => {
     if (isOpen) {
       setValues({
-        daily_quota: defaultValues.daily_quota || 0,
         quota_flash: defaultValues.quota_flash || 0,
         quota_25pro: defaultValues.quota_25pro || 0,
         quota_30pro: defaultValues.quota_30pro || 0
@@ -181,9 +179,13 @@ export function QuotaModal({ isOpen, onClose, onSubmit, title, defaultValues = {
     }
   }, [isOpen, defaultValues])
 
+  // 总配额自动计算
+  const totalQuota = values.quota_flash + values.quota_25pro + values.quota_30pro
+
   const handleSubmit = (e) => {
     e.preventDefault()
-    onSubmit(values)
+    // 提交时自动计算总配额
+    onSubmit({ ...values, daily_quota: totalQuota })
     onClose()
   }
 
@@ -192,15 +194,6 @@ export function QuotaModal({ isOpen, onClose, onSubmit, title, defaultValues = {
       <form onSubmit={handleSubmit}>
         <div className="space-y-4">
           <div>
-            <label className="block text-gray-400 text-sm mb-1">总配额（次/天）</label>
-            <input
-              type="number"
-              value={values.daily_quota}
-              onChange={(e) => setValues({ ...values, daily_quota: parseInt(e.target.value) || 0 })}
-              className="w-full px-4 py-2 bg-dark-900 border border-dark-600 rounded-lg text-white focus:border-purple-500 focus:outline-none"
-            />
-          </div>
-          <div className="border-t border-dark-600 pt-4">
             <p className="text-gray-400 text-sm mb-3">按模型配额（0=使用系统默认）</p>
             <div className="grid grid-cols-3 gap-3">
               <div>
@@ -230,6 +223,12 @@ export function QuotaModal({ isOpen, onClose, onSubmit, title, defaultValues = {
                   className="w-full px-3 py-2 bg-dark-900 border border-pink-700/50 rounded-lg text-white text-sm focus:border-pink-500 focus:outline-none"
                 />
               </div>
+            </div>
+          </div>
+          <div className="border-t border-dark-600 pt-4">
+            <div className="flex justify-between items-center">
+              <span className="text-gray-400 text-sm">总配额（自动计算）</span>
+              <span className="text-purple-400 font-semibold">{totalQuota.toLocaleString()}</span>
             </div>
           </div>
         </div>
