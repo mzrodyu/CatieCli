@@ -952,25 +952,25 @@ async def get_global_stats(
     )
     tier3_creds = tier3_cred_result.scalar() or 0
     
-    # 全站总额度（基于公共池的有效凭证计算，私有凭证额度不计入全站）
-    total_quota_flash = 0
-    total_quota_25pro = 0
-    total_quota_30pro = 0
+    # 全站总额度（基于活跃凭证计算）
+    # 活跃公共池凭证数 * 对应配额
+    public_active_count = public_creds.scalar() or 0
     
-    active_creds_result = await db.execute(
-        select(Credential.model_tier).where(
+    # 统计公共池中各等级凭证数量
+    tier3_public_result = await db.execute(
+        select(func.count(Credential.id)).where(
             Credential.is_active == True,
-            Credential.is_public == True
+            Credential.is_public == True,
+            Credential.model_tier == "3"
         )
     )
-    for tier in active_creds_result.scalars().all():
-        if tier == "3":
-            total_quota_flash += settings.quota_flash
-            total_quota_25pro += settings.quota_25pro
-            total_quota_30pro += settings.quota_30pro
-        else: # 默认按 2.5 计算
-            total_quota_flash += settings.quota_flash
-            total_quota_25pro += settings.quota_25pro
+    tier3_public_count = tier3_public_result.scalar() or 0
+    tier25_public_count = public_active_count - tier3_public_count
+    
+    # 计算总额度
+    total_quota_flash = public_active_count * settings.quota_flash
+    total_quota_25pro = public_active_count * settings.quota_25pro
+    total_quota_30pro = tier3_public_count * settings.quota_30pro
     
     # 活跃用户数（最近24小时）
     active_users_result = await db.execute(
@@ -994,7 +994,7 @@ async def get_global_stats(
         "credentials": {
             "total": total_creds.scalar() or 0,
             "active": active_creds.scalar() or 0,
-            "public": public_creds.scalar() or 0,
+            "public": public_active_count,
             "tier_3": tier3_creds,
         },
         "users": {
