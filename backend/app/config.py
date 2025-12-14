@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     # 非 Pro 号配额  
     stats_free_flash: int = 1300    # 非Pro号 Flash 额度
     stats_free_premium: int = 200   # 非Pro号 2.5Pro+3.0 共用额度
+    # 兼容旧配置项（前端设置页面使用）
+    stats_quota_flash: int = 1000   # 已废弃，保留兼容
+    stats_quota_25pro: int = 250    # 已废弃，保留兼容
+    stats_quota_30pro: int = 200    # 已废弃，保留兼容
     
     # 速率限制 (RPM - requests per minute)
     base_rpm: int = 5  # 未上传凭证的用户
