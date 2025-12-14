@@ -60,15 +60,49 @@ async def list_users(
     )
     cred_map = {row[0]: row[1] for row in cred_result.fetchall()}
     
+    # 3.5 批量查询3.0凭证数量
+    from sqlalchemy import case
+    cred_30_result = await db.execute(
+        select(Credential.user_id, func.count(Credential.id))
+        .where(Credential.user_id.in_(user_ids))
+        .where(Credential.is_active == True)
+        .where(Credential.model_tier == "3")
+        .group_by(Credential.user_id)
+    )
+    cred_30_map = {row[0]: row[1] for row in cred_30_result.fetchall()}
+    
     # 4. 构建用户列表
     user_list = []
     for u in users:
         today_usage = usage_map.get(u.id, 0)
         credential_count = cred_map.get(u.id, 0)
+        cred_30_count = cred_30_map.get(u.id, 0)
         
-        effective_quota = u.daily_quota + (u.bonus_quota or 0)
-        if settings.no_credential_quota > 0 and credential_count == 0:
-            effective_quota = min(effective_quota, settings.no_credential_quota)
+        # 计算真实配额
+        if u.quota_flash and u.quota_flash > 0:
+            quota_flash = u.quota_flash
+        elif credential_count > 0:
+            quota_flash = credential_count * settings.quota_flash
+        else:
+            quota_flash = settings.no_cred_quota_flash
+        
+        if u.quota_25pro and u.quota_25pro > 0:
+            quota_25pro = u.quota_25pro
+        elif credential_count > 0:
+            quota_25pro = credential_count * settings.quota_25pro
+        else:
+            quota_25pro = settings.no_cred_quota_25pro
+        
+        if u.quota_30pro and u.quota_30pro > 0:
+            quota_30pro = u.quota_30pro
+        elif cred_30_count > 0:
+            quota_30pro = cred_30_count * settings.quota_30pro
+        elif credential_count > 0:
+            quota_30pro = settings.cred25_quota_30pro
+        else:
+            quota_30pro = settings.no_cred_quota_30pro
+        
+        total_quota = quota_flash + quota_25pro + quota_30pro
         
         user_list.append({
             "id": u.id,
@@ -76,10 +110,10 @@ async def list_users(
             "email": u.email,
             "is_active": u.is_active,
             "is_admin": u.is_admin,
-            "daily_quota": effective_quota,
-            "quota_flash": u.quota_flash or 0,
-            "quota_25pro": u.quota_25pro or 0,
-            "quota_30pro": u.quota_30pro or 0,
+            "daily_quota": total_quota,
+            "quota_flash": quota_flash,
+            "quota_25pro": quota_25pro,
+            "quota_30pro": quota_30pro,
             "today_usage": today_usage,
             "credential_count": credential_count,
             "discord_id": u.discord_id,
