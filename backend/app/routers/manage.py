@@ -1030,18 +1030,23 @@ async def get_global_stats(
     # 无凭证用户数
     users_no_cred = total_users - users_with_any_cred
     
-    # 按用户类型计算配额分解
+    # 2.5凭证数（非3.0的活跃凭证）
+    creds_25_count = active_count - tier3_creds
+    
+    # 按用户类型计算配额分解（基于凭证数量）
     no_cred_flash = users_no_cred * settings.no_cred_quota_flash
     no_cred_25pro = users_no_cred * settings.no_cred_quota_25pro
     no_cred_30pro = users_no_cred * settings.no_cred_quota_30pro
-    cred25_flash = users_with_25_only * settings.quota_flash
-    cred25_25pro = users_with_25_only * settings.quota_25pro
-    cred25_30pro = users_with_25_only * settings.cred25_quota_30pro
-    cred30_flash = users_with_tier3 * settings.quota_flash
-    cred30_25pro = users_with_tier3 * settings.quota_25pro
-    cred30_30pro = users_with_tier3 * settings.quota_30pro
+    # 2.5凭证用户：按2.5凭证数量计算
+    cred25_flash = creds_25_count * settings.quota_flash
+    cred25_25pro = creds_25_count * settings.quota_25pro
+    cred25_30pro = users_with_25_only * settings.cred25_quota_30pro  # 3.0配额仍按用户数（因为是限制）
+    # 3.0凭证用户：按3.0凭证数量计算
+    cred30_flash = tier3_creds * settings.quota_flash
+    cred30_25pro = tier3_creds * settings.quota_25pro
+    cred30_30pro = tier3_creds * settings.quota_30pro
     
-    # 总配额 = 各用户类型配额的累加
+    # 总配额 = 各类型配额的累加
     total_quota_flash = no_cred_flash + cred25_flash + cred30_flash
     total_quota_25pro = no_cred_25pro + cred25_25pro + cred30_25pro
     total_quota_30pro = no_cred_30pro + cred25_30pro + cred30_30pro
