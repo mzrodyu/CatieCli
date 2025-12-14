@@ -53,10 +53,13 @@ class Settings(BaseSettings):
     quota_25pro: int = 500   # 2.5 Pro模型额度（凭证奖励）
     quota_30pro: int = 300   # 3.0模型额度（凭证奖励）
     
-    # 全站总额度计算基数（用于统计页面显示，每个公共池凭证贡献的额度）
-    stats_quota_flash: int = 1000   # 统计用 Flash 额度基数
-    stats_quota_25pro: int = 250    # 统计用 2.5 Pro 额度基数
-    stats_quota_30pro: int = 200    # 统计用 3.0 额度基数
+    # 全站总额度计算基数（用于统计页面显示，根据账号类型区分）
+    # Pro 号配额
+    stats_pro_flash: int = 750      # Pro号 Flash 额度
+    stats_pro_premium: int = 250    # Pro号 2.5Pro+3.0 共用额度
+    # 非 Pro 号配额  
+    stats_free_flash: int = 1300    # 非Pro号 Flash 额度
+    stats_free_premium: int = 200   # 非Pro号 2.5Pro+3.0 共用额度
     
     # 速率限制 (RPM - requests per minute)
     base_rpm: int = 5  # 未上传凭证的用户

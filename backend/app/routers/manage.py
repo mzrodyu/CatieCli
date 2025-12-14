@@ -369,9 +369,9 @@ async def verify_all_credentials(
             cred.is_active = is_valid
             # 根据实际模型检测结果设置 tier（Pro 是账号类型，不代表支持 3.0）
             cred.model_tier = "3" if supports_3 else "2.5"
-            # 暂时存储在 last_error 字段（后续可以添加专用字段）
+            # 存储账号类型到专用字段
             if account_type != "unknown":
-                cred.last_error = f"account_type:{account_type}"
+                cred.account_type = account_type
             
             # 确保变更被追踪并立即写入
             print(f"[检测] 设置 {cred.email} model_tier={cred.model_tier}, account_type={account_type}, supports_3={supports_3}", flush=True)
@@ -972,16 +972,43 @@ async def get_global_stats(
     )
     tier3_creds = tier3_cred_result.scalar() or 0
     
+    # 按账号类型统计凭证数量
+    pro_creds_result = await db.execute(
+        select(func.count(Credential.id))
+        .where(Credential.account_type == "pro")
+        .where(Credential.is_active == True)
+    )
+    pro_creds = pro_creds_result.scalar() or 0
+    
+    free_creds_result = await db.execute(
+        select(func.count(Credential.id))
+        .where(Credential.account_type != "pro")
+        .where(Credential.is_active == True)
+    )
+    free_creds = free_creds_result.scalar() or 0
+    
+    # 3.0 凭证中的 Pro 号和非 Pro 号
+    tier3_pro_result = await db.execute(
+        select(func.count(Credential.id))
+        .where(Credential.model_tier == "3")
+        .where(Credential.account_type == "pro")
+        .where(Credential.is_active == True)
+    )
+    tier3_pro = tier3_pro_result.scalar() or 0
+    tier3_free = tier3_creds - tier3_pro
+    
     # 全站总额度（基于所有活跃凭证计算）
     total_count = total_creds.scalar() or 0
     active_count = active_creds.scalar() or 0
     public_active_count = public_creds.scalar() or 0
     
-    # 计算总额度（基于所有活跃凭证，tier3_creds 已在上方查询）
-    # 注意：2.5 Pro 和 3.0 共用同一个 Pro 配额池，所以用相同基数计算
-    total_quota_flash = active_count * settings.stats_quota_flash
-    total_quota_25pro = active_count * settings.stats_quota_25pro
-    total_quota_30pro = tier3_creds * settings.stats_quota_25pro  # 3.0 与 2.5 共用 Pro 额度
+    # 计算总额度（根据账号类型区分配额）
+    # Flash 额度：Pro号×750 + 非Pro号×1300
+    total_quota_flash = pro_creds * settings.stats_pro_flash + free_creds * settings.stats_free_flash
+    # 2.5 Pro 额度（与 3.0 共用）：Pro号×250 + 非Pro号×200
+    total_quota_25pro = pro_creds * settings.stats_pro_premium + free_creds * settings.stats_free_premium
+    # 3.0 额度（与 2.5 共用同一池）：只有 3.0 凭证可用
+    total_quota_30pro = tier3_pro * settings.stats_pro_premium + tier3_free * settings.stats_free_premium
     
     # 活跃用户数（最近24小时）
     active_users_result = await db.execute(
@@ -1007,6 +1034,8 @@ async def get_global_stats(
             "active": active_count,
             "public": public_active_count,
             "tier_3": tier3_creds,
+            "pro": pro_creds,
+            "free": free_creds,
         },
         "users": {
             "active_24h": active_users,

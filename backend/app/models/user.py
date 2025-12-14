@@ -87,6 +87,7 @@ class Credential(Base):
     project_id = Column(String(200), nullable=True)  # Google Cloud Project ID
     credential_type = Column(String(20), default="api_key")  # api_key 或 oauth
     model_tier = Column(String(10), default="2.5")  # 模型等级: "3" 或 "2.5"
+    account_type = Column(String(20), default="free")  # 账号类型: "pro" 或 "free"
     email = Column(String(100), nullable=True)  # OAuth 关联的邮箱
     is_public = Column(Boolean, default=False)  # 是否捐赠到公共池
     is_active = Column(Boolean, default=True)
