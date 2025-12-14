@@ -978,9 +978,10 @@ async def get_global_stats(
     public_active_count = public_creds.scalar() or 0
     
     # 计算总额度（基于所有活跃凭证，tier3_creds 已在上方查询）
+    # 注意：2.5 Pro 和 3.0 共用同一个 Pro 配额池，所以用相同基数计算
     total_quota_flash = active_count * settings.stats_quota_flash
     total_quota_25pro = active_count * settings.stats_quota_25pro
-    total_quota_30pro = tier3_creds * settings.stats_quota_30pro
+    total_quota_30pro = tier3_creds * settings.stats_quota_25pro  # 3.0 与 2.5 共用 Pro 额度
     
     # 活跃用户数（最近24小时）
     active_users_result = await db.execute(
