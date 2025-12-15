@@ -314,7 +314,7 @@ async def start_all_credentials(
     import asyncio
     from app.services.credential_pool import CredentialPool
     from app.services.crypto import encrypt_credential
-    from app.database import async_session_maker
+    from app.database import async_session
     
     result = await db.execute(
         select(Credential).where(
@@ -365,7 +365,7 @@ async def start_all_credentials(
         results = await asyncio.gather(*[refresh_single(d) for d in cred_data])
         
         # 批量更新数据库
-        async with async_session_maker() as session:
+        async with async_session() as session:
             for res in results:
                 if res["token"]:
                     await session.execute(
@@ -412,7 +412,7 @@ async def verify_all_credentials(
     import asyncio
     import httpx
     from app.services.credential_pool import CredentialPool
-    from app.database import async_session_maker
+    from app.database import async_session
     
     result = await db.execute(select(Credential))
     creds = result.scalars().all()
@@ -498,7 +498,7 @@ async def verify_all_credentials(
         results = await asyncio.gather(*[verify_single(d) for d in cred_data])
         
         # 批量更新数据库
-        async with async_session_maker() as session:
+        async with async_session() as session:
             for res in results:
                 model_tier = "3" if res["supports_3"] else "2.5"
                 update_vals = {"is_active": res["is_valid"], "model_tier": model_tier}
