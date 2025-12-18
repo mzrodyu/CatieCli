@@ -47,6 +47,7 @@ export default function Admin() {
   const [inputModal, setInputModal] = useState({ open: false, title: '', label: '', defaultValue: '', onSubmit: null })
   const [quotaModal, setQuotaModal] = useState({ open: false, userId: null, defaultValues: {} })
   const [credDetailModal, setCredDetailModal] = useState({ open: false, data: null, loading: false })
+  const [duplicateModal, setDuplicateModal] = useState({ open: false, data: null, loading: false })
 
   const showAlert = (title, message, type = 'info') => setAlertModal({ open: true, title, message, type })
   const showConfirm = (title, message, onConfirm, danger = false) => setConfirmModal({ open: true, title, message, onConfirm, danger })
@@ -270,6 +271,17 @@ export default function Admin() {
     } catch (err) {
       setCredDetailModal({ open: false, data: null, loading: false })
       showAlert('获取失败', err.response?.data?.detail || err.message, 'error')
+    }
+  }
+
+  const checkDuplicates = async () => {
+    setDuplicateModal({ open: true, data: null, loading: true })
+    try {
+      const res = await api.get('/api/admin/credentials/duplicates')
+      setDuplicateModal({ open: true, data: res.data, loading: false })
+    } catch (err) {
+      setDuplicateModal({ open: false, data: null, loading: false })
+      showAlert('检测失败', err.response?.data?.detail || err.message, 'error')
     }
   }
 
@@ -633,6 +645,18 @@ export default function Admin() {
                       一键清理
                     </button>
                   </div>
+                  
+                  <div className="bg-yellow-600/20 border border-yellow-500/30 rounded-xl p-4">
+                    <div className="font-medium text-yellow-400 mb-1">🔍 重复检测</div>
+                    <p className="text-sm text-gray-400 mb-3">检测重复的凭证</p>
+                    <button
+                      onClick={checkDuplicates}
+                      className="btn bg-yellow-600 hover:bg-yellow-500 text-white flex items-center gap-2 w-full justify-center"
+                    >
+                      <Eye size={16} />
+                      开始检测
+                    </button>
+                  </div>
                 </div>
                 
                 {/* 检测结果 */}
@@ -992,6 +1016,83 @@ export default function Admin() {
                     <span className="text-gray-500">最后错误:</span>
                     <div className="mt-1 p-2 bg-red-900/20 border border-red-500/30 rounded text-xs text-red-300 break-all max-h-32 overflow-auto">{credDetailModal.data.last_error || '无'}</div>
                   </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 重复检测模态框 */}
+      {duplicateModal.open && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-dark-800 rounded-xl border border-dark-600 w-full max-w-4xl max-h-[85vh] overflow-auto">
+            <div className="flex items-center justify-between p-4 border-b border-dark-600 sticky top-0 bg-dark-800">
+              <h3 className="text-lg font-medium">🔍 重复凭证检测</h3>
+              <button
+                onClick={() => setDuplicateModal({ open: false, data: null, loading: false })}
+                className="p-1.5 rounded hover:bg-dark-700 text-gray-400"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-4">
+              {duplicateModal.loading ? (
+                <div className="text-center py-8 text-gray-400">检测中...</div>
+              ) : duplicateModal.data ? (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-4 text-sm">
+                    <span className="text-gray-400">总凭证数: <span className="text-white">{duplicateModal.data.total_credentials}</span></span>
+                    <span className="text-yellow-400">重复凭证数: <span className="font-bold">{duplicateModal.data.duplicate_count}</span></span>
+                  </div>
+                  
+                  {duplicateModal.data.duplicates.length === 0 ? (
+                    <div className="text-center py-8 text-green-400">✅ 没有发现重复凭证</div>
+                  ) : (
+                    <div className="space-y-4">
+                      {duplicateModal.data.duplicates.map((dup, idx) => (
+                        <div key={idx} className="bg-dark-900 rounded-lg p-4 border border-yellow-500/30">
+                          <div className="flex items-center gap-2 mb-3">
+                            <span className={`px-2 py-0.5 rounded text-xs ${dup.type === 'email' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'}`}>
+                              {dup.type === 'email' ? '📧 邮箱重复' : '🔑 Token重复'}
+                            </span>
+                            <span className="text-gray-400 text-sm font-mono">{dup.key}</span>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="text-gray-500 text-left">
+                                  <th className="pb-2 pr-4">ID</th>
+                                  <th className="pb-2 pr-4">上传者</th>
+                                  <th className="pb-2 pr-4">等级</th>
+                                  <th className="pb-2 pr-4">状态</th>
+                                  <th className="pb-2 pr-4">公共</th>
+                                  <th className="pb-2 pr-4">请求数</th>
+                                  <th className="pb-2">上传时间</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {dup.credentials.map((cred, cidx) => (
+                                  <tr key={cidx} className={cidx === 0 ? 'text-green-400' : 'text-gray-300'}>
+                                    <td className="py-1 pr-4">{cred.id}</td>
+                                    <td className="py-1 pr-4">{cred.username}</td>
+                                    <td className="py-1 pr-4">{cred.model_tier}</td>
+                                    <td className="py-1 pr-4">{cred.is_active ? '✅' : '❌'}</td>
+                                    <td className="py-1 pr-4">{cred.is_public ? '是' : '否'}</td>
+                                    <td className="py-1 pr-4">{cred.total_requests}</td>
+                                    <td className="py-1 text-xs text-gray-500">{cred.created_at?.slice(0, 10)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          <div className="mt-2 text-xs text-gray-500">
+                            💡 绿色行是最早上传的（建议保留），其他是后续重复上传的
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ) : null}
             </div>

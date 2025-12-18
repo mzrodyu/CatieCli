@@ -374,6 +374,97 @@ async def export_all_credentials(
     return export_data
 
 
+@router.get("/credentials/duplicates")
+async def check_duplicate_credentials(
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """检测重复凭证（相同邮箱或相同refresh_token）"""
+    from app.services.crypto import decrypt_credential
+    from collections import defaultdict
+    
+    # 获取所有凭证
+    result = await db.execute(
+        select(Credential, User.username)
+        .outerjoin(User, Credential.user_id == User.id)
+        .order_by(Credential.created_at.asc())
+    )
+    rows = result.all()
+    
+    # 按邮箱分组
+    email_groups = defaultdict(list)
+    # 按 refresh_token 分组
+    token_groups = defaultdict(list)
+    
+    for row in rows:
+        c = row[0]
+        username = row[1]
+        
+        cred_info = {
+            "id": c.id,
+            "email": c.email,
+            "name": c.name,
+            "username": username or "系统",
+            "user_id": c.user_id,
+            "is_active": c.is_active,
+            "is_public": c.is_public,
+            "model_tier": c.model_tier,
+            "total_requests": c.total_requests,
+            "created_at": c.created_at.isoformat() if c.created_at else None
+        }
+        
+        # 按邮箱分组
+        if c.email:
+            email_groups[c.email].append(cred_info)
+        
+        # 按 refresh_token 分组（解密后比较）
+        if c.refresh_token:
+            try:
+                token = decrypt_credential(c.refresh_token)
+                # 只取前50字符作为key，避免太长
+                token_key = token[:50] if token else None
+                if token_key:
+                    token_groups[token_key].append(cred_info)
+            except:
+                pass
+    
+    # 找出重复的
+    duplicate_emails = {k: v for k, v in email_groups.items() if len(v) > 1}
+    duplicate_tokens = {k: v for k, v in token_groups.items() if len(v) > 1}
+    
+    # 合并结果，去重
+    all_duplicate_ids = set()
+    duplicates = []
+    
+    for email, creds in duplicate_emails.items():
+        for cred in creds:
+            if cred["id"] not in all_duplicate_ids:
+                all_duplicate_ids.add(cred["id"])
+        duplicates.append({
+            "type": "email",
+            "key": email,
+            "credentials": creds
+        })
+    
+    for token_key, creds in duplicate_tokens.items():
+        # 检查是否已经被邮箱重复覆盖
+        ids = [c["id"] for c in creds]
+        if not all(id in all_duplicate_ids for id in ids):
+            for cred in creds:
+                all_duplicate_ids.add(cred["id"])
+            duplicates.append({
+                "type": "token",
+                "key": f"{token_key[:20]}...",
+                "credentials": creds
+            })
+    
+    return {
+        "total_credentials": len(rows),
+        "duplicate_count": len(all_duplicate_ids),
+        "duplicates": duplicates
+    }
+
+
 # ===== 统计 =====
 @router.get("/stats")
 async def get_stats(
