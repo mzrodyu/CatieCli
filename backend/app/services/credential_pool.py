@@ -392,6 +392,116 @@ class CredentialPool:
                 print(f"[凭证禁用] 凭证 {credential_id} 已禁用: {error}", flush=True)
     
     @staticmethod
+    def parse_429_retry_after(error_text: str, headers: dict = None) -> int:
+        """
+        从 Google 429 响应中解析 CD 时间
+        
+        Google 429 响应格式示例:
+        - Retry-After 头: "60"
+        - 错误信息中: "retryDelay": "60s" 或 "retry after 60 seconds"
+        
+        Returns:
+            CD 秒数，如果解析失败返回 0
+        """
+        import re
+        
+        cd_seconds = 0
+        
+        # 1. 尝试从 Retry-After 头解析
+        if headers:
+            retry_after = headers.get("Retry-After") or headers.get("retry-after")
+            if retry_after:
+                try:
+                    cd_seconds = int(retry_after)
+                    print(f"[429 CD] 从 Retry-After 头解析到 CD: {cd_seconds}s", flush=True)
+                    return cd_seconds
+                except:
+                    pass
+        
+        # 2. 尝试从错误信息中解析 retryDelay
+        # 格式: "retryDelay": "60s" 或 "retryDelay":"60s"
+        match = re.search(r'"retryDelay"\s*:\s*"(\d+)s?"', error_text)
+        if match:
+            cd_seconds = int(match.group(1))
+            print(f"[429 CD] 从 retryDelay 解析到 CD: {cd_seconds}s", flush=True)
+            return cd_seconds
+        
+        # 3. 尝试匹配 "retry after X seconds" 格式
+        match = re.search(r'retry\s+after\s+(\d+)\s*s', error_text, re.IGNORECASE)
+        if match:
+            cd_seconds = int(match.group(1))
+            print(f"[429 CD] 从文本解析到 CD: {cd_seconds}s", flush=True)
+            return cd_seconds
+        
+        # 4. 尝试匹配纯数字秒数
+        match = re.search(r'(\d+)\s*seconds?', error_text, re.IGNORECASE)
+        if match:
+            cd_seconds = int(match.group(1))
+            print(f"[429 CD] 从 seconds 解析到 CD: {cd_seconds}s", flush=True)
+            return cd_seconds
+        
+        print(f"[429 CD] 未能解析 CD 时间，使用默认值", flush=True)
+        return 0
+    
+    @staticmethod
+    async def handle_429_rate_limit(
+        db: AsyncSession, 
+        credential_id: int, 
+        model: str,
+        error_text: str,
+        headers: dict = None
+    ):
+        """
+        处理 429 速率限制错误：
+        1. 解析 Google 返回的 CD 时间
+        2. 设置凭证对应模型组的 CD 时间
+        """
+        # 解析 CD 时间
+        cd_seconds = CredentialPool.parse_429_retry_after(error_text, headers)
+        
+        if cd_seconds <= 0:
+            # 如果没有解析到 CD 时间，使用默认值 60 秒
+            cd_seconds = 60
+            print(f"[429 CD] 使用默认 CD: {cd_seconds}s", flush=True)
+        
+        # 确定模型组
+        model_group = CredentialPool.get_model_group(model)
+        
+        # 获取凭证
+        result = await db.execute(select(Credential).where(Credential.id == credential_id))
+        cred = result.scalar_one_or_none()
+        
+        if cred:
+            # 设置 CD 结束时间 = 当前时间 - 配置的 CD 时间 + Google 返回的 CD 时间
+            # 这样 is_credential_in_cd 函数会正确计算剩余 CD
+            now = datetime.utcnow()
+            
+            # 直接设置 last_used 为一个特殊值，使得 CD 到期时间 = now + cd_seconds
+            # CD 到期时间 = last_used + config_cd_seconds
+            # 我们想要 CD 到期时间 = now + google_cd_seconds
+            # 所以 last_used = now + google_cd_seconds - config_cd_seconds
+            config_cd = CredentialPool.get_cd_seconds(model_group)
+            if config_cd > 0:
+                # 计算需要设置的 last_used 时间
+                # 使 CD 到期时间 = now + google_cd_seconds
+                cd_end = now + timedelta(seconds=cd_seconds)
+                last_used = cd_end - timedelta(seconds=config_cd)
+            else:
+                # 如果配置的 CD 为 0，则直接使用当前时间
+                # 此时 CD 机制不会生效，但我们仍然记录
+                last_used = now
+            
+            if model_group == "30":
+                cred.last_used_30 = last_used
+            elif model_group == "pro":
+                cred.last_used_pro = last_used
+            else:
+                cred.last_used_flash = last_used
+            
+            await db.commit()
+            print(f"[429 CD] 凭证 {credential_id} 模型组 {model_group} 设置 CD {cd_seconds}s", flush=True)
+    
+    @staticmethod
     async def get_all_credentials(db: AsyncSession):
         """获取所有凭证"""
         result = await db.execute(select(Credential).order_by(Credential.created_at.desc()))
