@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from datetime import date, datetime, timedelta
 from typing import Optional
 import json
@@ -99,31 +99,40 @@ async def get_user_from_api_key(request: Request, db: AsyncSession = Depends(get
     else:
         user_quota_flash = settings.no_cred_quota_flash
     
+    # Pro配额（2.5pro和3.0共享）
+    # 官方规则：无3.0资格200次2.5pro，有3.0资格100次共享，Pro号250次共享
     if user.quota_25pro and user.quota_25pro > 0:
-        user_quota_25pro = user.quota_25pro
-    elif has_credential:
-        user_quota_25pro = total_cred_count * settings.quota_25pro
-    else:
-        user_quota_25pro = settings.no_cred_quota_25pro
-    
-    if user.quota_30pro and user.quota_30pro > 0:
-        user_quota_30pro = user.quota_30pro
+        user_quota_pro = user.quota_25pro  # 用户手动设置的配额
     elif cred_30_count > 0:
-        user_quota_30pro = cred_30_count * settings.quota_30pro
+        # 有3.0凭证：使用3.0配额（2.5pro和3.0共享）
+        user_quota_pro = cred_30_count * settings.quota_30pro
     elif has_credential:
-        user_quota_30pro = settings.cred25_quota_30pro
+        # 只有2.5凭证：使用2.5pro配额
+        user_quota_pro = total_cred_count * settings.quota_25pro
     else:
-        user_quota_30pro = settings.no_cred_quota_30pro
+        # 无凭证
+        user_quota_pro = settings.no_cred_quota_25pro
+    
+    # 判断用户是否有3.0资格（用于决定是否允许使用3.0模型）
+    has_30_access = cred_30_count > 0 or (user.quota_30pro and user.quota_30pro > 0)
 
     # 确定当前请求的模型类别和对应配额
     if required_tier == "3":
-        quota_limit = user_quota_30pro
-        model_filter = UsageLog.model.like('%3%')
-        quota_name = "3.0模型"
+        if not has_30_access:
+            raise HTTPException(status_code=403, detail="无 3.0 模型使用配额")
+        quota_limit = user_quota_pro
+        # 2.5pro和3.0共享配额，统计所有pro模型（含2.5pro和3.0）
+        model_filter = or_(UsageLog.model.like('%pro%'), UsageLog.model.like('%3%'))
+        quota_name = "Pro模型(2.5pro+3.0共享)"
     elif "pro" in model.lower():
-        quota_limit = user_quota_25pro
-        model_filter = UsageLog.model.like('%pro%')
-        quota_name = "2.5 Pro模型"
+        quota_limit = user_quota_pro
+        # 2.5pro和3.0共享配额
+        if has_30_access:
+            model_filter = or_(UsageLog.model.like('%pro%'), UsageLog.model.like('%3%'))
+            quota_name = "Pro模型(2.5pro+3.0共享)"
+        else:
+            model_filter = UsageLog.model.like('%pro%')
+            quota_name = "2.5 Pro模型"
     else:
         quota_limit = user_quota_flash
         model_filter = UsageLog.model.notlike('%pro%')
@@ -144,9 +153,6 @@ async def get_user_from_api_key(request: Request, db: AsyncSession = Depends(get
                 status_code=429, 
                 detail=f"已达到{quota_name}每日配额限制 ({current_usage}/{quota_limit})"
             )
-    elif quota_limit == 0 and required_tier == "3":
-        # 没有 3.0 配额但尝试使用 3.0 模型
-        raise HTTPException(status_code=403, detail="无 3.0 模型使用配额")
     
     # 同时检查总配额
     if has_credential:
