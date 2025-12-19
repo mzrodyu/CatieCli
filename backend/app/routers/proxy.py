@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, and_
 from datetime import date, datetime, timedelta
 from typing import Optional
 import json
@@ -135,7 +135,8 @@ async def get_user_from_api_key(request: Request, db: AsyncSession = Depends(get
             quota_name = "2.5 Pro模型"
     else:
         quota_limit = user_quota_flash
-        model_filter = UsageLog.model.notlike('%pro%')
+        # Flash配额：排除pro和3.0模型
+        model_filter = and_(UsageLog.model.notlike('%pro%'), UsageLog.model.notlike('%3%'))
         quota_name = "Flash模型"
 
     # 检查该类别模型的使用量
