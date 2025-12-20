@@ -331,12 +331,14 @@ class CredentialPool:
     @staticmethod
     async def mark_credential_error(db: AsyncSession, credential_id: int, error: str):
         """标记凭证错误"""
+        # 过滤掉无法编码的 UTF-16 代理字符（如不完整的 emoji）
+        safe_error = error.encode('utf-8', errors='surrogatepass').decode('utf-8', errors='replace') if error else ""
         await db.execute(
             update(Credential)
             .where(Credential.id == credential_id)
             .values(
                 failed_requests=Credential.failed_requests + 1,
-                last_error=error
+                last_error=safe_error[:1000]  # 限制长度防止过长
             )
         )
         await db.commit()
