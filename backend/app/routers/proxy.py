@@ -18,6 +18,34 @@ from app.config import settings
 router = APIRouter(tags=["API代理"])
 
 
+def safe_json_dumps(obj, **kwargs):
+    """安全的JSON序列化，处理UTF-8代理对（surrogates）
+
+    Google API可能返回包含无效UTF-8字符的数据（如\ud83d等代理对），
+    这些字符在标准UTF-8中不允许单独存在。此函数会自动过滤这些字符。
+
+    Args:
+        obj: 要序列化的对象
+        **kwargs: 传递给json.dumps的其他参数
+
+    Returns:
+        str: 安全的JSON字符串
+    """
+    try:
+        # 首先尝试标准序列化
+        return json.dumps(obj, **kwargs)
+    except UnicodeEncodeError:
+        # 如果遇到编码错误，使用surrogatepass错误处理器
+        # 将对象转为JSON字符串，然后用errors='ignore'编码并解码，去除代理对
+        json_str = json.dumps(obj, ensure_ascii=False, **kwargs)
+        # 编码为bytes并忽略无法处理的字符，然后解码回字符串
+        cleaned = json_str.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
+        return cleaned
+    except Exception:
+        # 最后的兜底：强制使用ASCII编码
+        return json.dumps(obj, ensure_ascii=True, **kwargs)
+
+
 async def get_user_from_api_key(request: Request, db: AsyncSession = Depends(get_db)) -> User:
     """从请求中提取API Key并验证用户"""
     api_key = None
@@ -421,7 +449,7 @@ async def chat_completions(
                             
                             # 无法重试，输出错误
                             await log_usage(500, cred=credential)
-                            yield f"data: {json.dumps({'error': f'API Error (已重试 {stream_retry + 1} 次): {error_str}'})}\n\n"
+                            yield f"data: {safe_json_dumps({'error': f'API Error (已重试 {stream_retry + 1} 次): {error_str}'})}\n\n"
                             return
                 
                 return StreamingResponse(
@@ -729,9 +757,9 @@ async def gemini_stream_generate_content(
                                 db, credential.id, model, error_text, dict(response.headers)
                             )
                             await log_usage(response.status_code, cd_seconds=cd_sec)
-                        yield f"data: {json.dumps({'error': error.decode()})}\n\n"
+                        yield f"data: {safe_json_dumps({'error': error.decode()})}\n\n"
                         return
-                    
+
                     async for line in response.aiter_lines():
                         if line:
                             # 转换 SSE 数据格式
@@ -743,19 +771,19 @@ async def gemini_stream_generate_content(
                                         standard_data = data.get("response", {})
                                         if "modelVersion" in data:
                                             standard_data["modelVersion"] = data["modelVersion"]
-                                        yield f"data: {json.dumps(standard_data)}\n\n"
+                                        yield f"data: {safe_json_dumps(standard_data)}\n\n"
                                     else:
                                         yield f"{line}\n"
                                 except:
                                     yield f"{line}\n"
                             else:
                                 yield f"{line}\n"
-            
+
             await log_usage()
         except Exception as e:
             await CredentialPool.handle_credential_failure(db, credential.id, str(e))
             await log_usage(500)
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            yield f"data: {safe_json_dumps({'error': str(e)})}\n\n"
     
     return StreamingResponse(
         stream_generator(),
@@ -860,17 +888,17 @@ async def openai_proxy(
                             if response.status_code != 200:
                                 error = await response.aread()
                                 await log_usage(response.status_code)
-                                yield f"data: {json.dumps({'error': error.decode()})}\n\n"
+                                yield f"data: {safe_json_dumps({'error': error.decode()})}\n\n"
                                 return
-                            
+
                             async for line in response.aiter_lines():
                                 if line:
                                     yield f"{line}\n"
-                    
+
                     await log_usage()
                 except Exception as e:
                     await log_usage(500)
-                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                    yield f"data: {safe_json_dumps({'error': str(e)})}\n\n"
             
             return StreamingResponse(
                 stream_generator(),
