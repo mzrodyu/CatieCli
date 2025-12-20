@@ -596,6 +596,7 @@ async def gemini_generate_content(
                 # 401/403 错误自动禁用凭证
                 if response.status_code in [401, 403]:
                     await CredentialPool.handle_credential_failure(db, credential.id, f"API Error {response.status_code}: {error_text}")
+                    await log_usage(response.status_code)
                 # 429 错误解析 Google 返回的 CD 时间
                 elif response.status_code == 429:
                     cd_sec = await CredentialPool.handle_429_rate_limit(
@@ -723,12 +724,16 @@ async def gemini_stream_generate_content(
                         # 401/403 错误自动禁用凭证
                         if response.status_code in [401, 403]:
                             await CredentialPool.handle_credential_failure(db, credential.id, f"API Error {response.status_code}: {error_text}")
+                            await log_usage(response.status_code)
                         # 429 错误解析 Google 返回的 CD 时间
                         elif response.status_code == 429:
                             cd_sec = await CredentialPool.handle_429_rate_limit(
                                 db, credential.id, model, error_text, dict(response.headers)
                             )
                             await log_usage(response.status_code, cd_seconds=cd_sec)
+                        # 其他错误（500等）也要记录
+                        else:
+                            await log_usage(response.status_code)
                         yield f"data: {json.dumps({'error': error.decode()})}\n\n"
                         return
                     
