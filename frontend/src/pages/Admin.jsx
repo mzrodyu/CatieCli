@@ -1252,7 +1252,7 @@ export default function Admin() {
         title={inputModal.title}
         label={inputModal.label}
         defaultValue={inputModal.defaultValue}
-        type="number"
+        type="text"
       />
       <QuotaModal
         isOpen={quotaModal.open}
